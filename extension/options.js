@@ -1,7 +1,7 @@
 // Keep - Options Script
 
 const DEFAULT_SERVER_URL = 'http://localhost:3000';
-const DEFAULT_API_KEY = 'keep_secret_token_12345';
+const DEFAULT_API_KEY = 'keep_sec_43d2140f76b3aee82c32c4f11e49b950ebe0d355d82e937b';
 
 const serverUrlInput = document.getElementById('serverUrl');
 const apiKeyInput = document.getElementById('apiKey');

@@ -9,7 +9,8 @@
     "scripting"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "http://*/*",
+    "https://*/*"
   ],
   "action": {
     "default_title": "Save to Keep",

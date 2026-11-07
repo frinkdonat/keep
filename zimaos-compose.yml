@@ -1,14 +1,13 @@
 name: keep
 services:
   keep:
-    build: .
-    image: keep:latest
+    image: ghcr.io/frinkdonat/keep:latest
     container_name: keep-app
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      - API_KEY=keep_secret_token_12345
+      - API_KEY=keep_sec_43d2140f76b3aee82c32c4f11e49b950ebe0d355d82e937b
       - MASTER_PASSCODE=
       - DATA_DIR=/app/data
     volumes:
@@ -34,11 +33,12 @@ x-casaos:
     - amd64
     - arm64
   main: keep
-  author: Keep
+  author: frinkdonat
   category: Utilities
   description:
-    en_us: Minimalist stripped-down watch later & curated bookmarking app with 1-click Chrome Extension.
+    en_us: Minimalist, stripped-down watch later & curated bookmarking app with 1-click Chrome Extension.
   developer: USU
+  icon: https://raw.githubusercontent.com/frinkdonat/keep/main/public/watermark.png
   title:
     en_us: Keep
   index: /
