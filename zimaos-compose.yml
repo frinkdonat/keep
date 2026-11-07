@@ -1,0 +1,45 @@
+name: keep
+services:
+  keep:
+    build: .
+    image: keep:latest
+    container_name: keep-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - API_KEY=keep_secret_token_12345
+      - MASTER_PASSCODE=
+      - DATA_DIR=/app/data
+    volumes:
+      - /DATA/AppData/keep/data:/app/data
+    x-casaos:
+      envs:
+        - container: API_KEY
+          description:
+            en_us: Secret token for Chrome Extension
+        - container: MASTER_PASSCODE
+          description:
+            en_us: Optional master passcode for Web UI
+      ports:
+        - container: "3000"
+          description:
+            en_us: Web UI port
+      volumes:
+        - container: /app/data
+          description:
+            en_us: SQLite data directory
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: keep
+  author: Keep
+  category: Utilities
+  description:
+    en_us: Minimalist stripped-down watch later & curated bookmarking app with 1-click Chrome Extension.
+  developer: USU
+  title:
+    en_us: Keep
+  index: /
+  port_map: "3000"
