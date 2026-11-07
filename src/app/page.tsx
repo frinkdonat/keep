@@ -7,8 +7,8 @@ import {
   CheckCircle2,
   Tv, 
   Archive,
-  Star,
-  FileText
+  FileText,
+  Trash2
 } from 'lucide-react';
 import { KeepItem, FilterCategory, ItemStats } from '@/lib/types';
 import { FilterTabs } from '@/components/FilterTabs';
@@ -28,6 +28,7 @@ export default function HomePage() {
   });
   const [filter, setFilter] = useState<FilterCategory>('inbox');
   const [loading, setLoading] = useState(true);
+  const [clearingArchive, setClearingArchive] = useState(false);
 
   // Modals
   const [selectedVideo, setSelectedVideo] = useState<KeepItem | null>(null);
@@ -120,29 +121,6 @@ export default function HomePage() {
     }
   };
 
-  // Toggle Favorite
-  const handleToggleFavorite = async (item: KeepItem) => {
-    const nextFav = item.is_favorite === 1 ? 0 : 1;
-    setItems((prev) =>
-      prev.map((i) => (i.id === item.id ? { ...i, is_favorite: nextFav } : i))
-    );
-
-    setStats((prev) => ({
-      ...prev,
-      favoritesCount: nextFav ? prev.favoritesCount + 1 : Math.max(0, prev.favoritesCount - 1),
-    }));
-
-    try {
-      await fetch(`/api/links/${item.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_favorite: nextFav }),
-      });
-    } catch {
-      loadItems(filter);
-    }
-  };
-
   // Delete Item
   const handleDelete = async (item: KeepItem) => {
     if (!confirm(`Delete "${item.title}"?`)) return;
@@ -153,6 +131,27 @@ export default function HomePage() {
       loadItems(filter);
     } catch {
       loadItems(filter);
+    }
+  };
+
+  // Clear All Archive Items
+  const handleClearArchive = async () => {
+    if (!confirm(`Are you sure you want to permanently delete all ${items.length} archived items? This cannot be undone.`)) {
+      return;
+    }
+
+    setClearingArchive(true);
+    setItems([]);
+    setStats((prev) => ({ ...prev, archiveCount: 0 }));
+
+    try {
+      await fetch('/api/links?scope=archive', { method: 'DELETE' });
+      await loadItems('archive');
+    } catch (err) {
+      console.error('Failed to clear archive:', err);
+      loadItems('archive');
+    } finally {
+      setClearingArchive(false);
     }
   };
 
@@ -173,15 +172,12 @@ export default function HomePage() {
       {/* Streamlined Single-Row Navigation Header */}
       <header className="sticky top-0 z-30 border-b border-zinc-800/80 bg-[#09090b]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6">
-          {/* Logo */}
+          {/* Logo (No green dot) */}
           <div className="flex items-center gap-2.5 flex-shrink-0 mr-4">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/20">
               <Bookmark className="h-4 w-4 fill-white" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold tracking-wider text-sm text-zinc-100">KEEP</span>
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" title="Connected" />
-            </div>
+            <span className="font-semibold tracking-wider text-sm text-zinc-100">KEEP</span>
           </div>
 
           {/* Filter Tabs in the Header */}
@@ -193,9 +189,23 @@ export default function HomePage() {
             />
           </div>
 
-          {/* Item Count */}
-          <div className="hidden sm:flex items-center text-xs text-zinc-500 font-mono flex-shrink-0 ml-4">
-            <span>{items.length} {items.length === 1 ? 'item' : 'items'}</span>
+          {/* Header Right Actions (Clear Archive or Item Count) */}
+          <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+            {filter === 'archive' && items.length > 0 && (
+              <button
+                onClick={handleClearArchive}
+                disabled={clearingArchive}
+                className="flex items-center gap-1.5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition cursor-pointer"
+                title="Permanently delete all items in Archive"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete All</span>
+              </button>
+            )}
+
+            <div className="hidden sm:flex items-center text-xs text-zinc-500 font-mono">
+              <span>{items.length} {items.length === 1 ? 'item' : 'items'}</span>
+            </div>
           </div>
         </div>
       </header>
@@ -215,7 +225,6 @@ export default function HomePage() {
                 item={item}
                 onPlayVideo={setSelectedVideo}
                 onToggleArchive={handleToggleArchive}
-                onToggleFavorite={handleToggleFavorite}
                 onDelete={handleDelete}
               />
             ))}
@@ -251,16 +260,6 @@ export default function HomePage() {
                 <h3 className="text-sm font-medium text-zinc-300">No articles</h3>
                 <p className="text-xs text-zinc-500 mt-1">
                   No website links in queue.
-                </p>
-              </>
-            ) : filter === 'favorites' ? (
-              <>
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-900/80 text-zinc-400 mb-3 border border-zinc-800/80">
-                  <Star className="h-6 w-6 text-amber-400/80" />
-                </div>
-                <h3 className="text-sm font-medium text-zinc-300">No favorites</h3>
-                <p className="text-xs text-zinc-500 mt-1">
-                  Star items to keep them pinned here.
                 </p>
               </>
             ) : (

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Inbox, Video, Newspaper, Star, Archive } from 'lucide-react';
+import { Inbox, Video, Newspaper, Archive } from 'lucide-react';
 import { FilterCategory, ItemStats } from '@/lib/types';
 
 interface FilterTabsProps {
@@ -29,12 +29,6 @@ export function FilterTabs({ activeFilter, onFilterChange, stats }: FilterTabsPr
       label: 'Articles & Sites',
       icon: Newspaper,
       count: stats.articlesCount,
-    },
-    {
-      id: 'favorites' as FilterCategory,
-      label: 'Favorites',
-      icon: Star,
-      count: stats.favoritesCount,
     },
     {
       id: 'archive' as FilterCategory,

@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import Image from 'next/image';
 import { 
   Play, 
   Check, 
   RotateCcw, 
-  Star, 
   Trash2, 
   ExternalLink, 
   Copy, 
@@ -20,7 +18,6 @@ interface ItemCardProps {
   item: KeepItem;
   onPlayVideo: (item: KeepItem) => void;
   onToggleArchive: (item: KeepItem) => void;
-  onToggleFavorite: (item: KeepItem) => void;
   onDelete: (item: KeepItem) => void;
 }
 
@@ -28,7 +25,6 @@ export function ItemCard({
   item,
   onPlayVideo,
   onToggleArchive,
-  onToggleFavorite,
   onDelete,
 }: ItemCardProps) {
   const [copied, setCopied] = useState(false);
@@ -75,7 +71,7 @@ export function ItemCard({
 
             {/* YouTube Tag */}
             <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-md bg-black/75 px-2 py-0.5 text-[11px] font-medium text-zinc-200 backdrop-blur-md">
-              <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
               <span>YouTube</span>
             </div>
           </div>
@@ -183,19 +179,6 @@ export function ItemCard({
                 <span className="text-[11px]">Done</span>
               </>
             )}
-          </button>
-
-          {/* Toggle Favorite */}
-          <button
-            onClick={() => onToggleFavorite(item)}
-            className={`rounded-md p-1.5 transition cursor-pointer ${
-              item.is_favorite
-                ? 'text-amber-400 bg-amber-400/10'
-                : 'text-zinc-400 hover:bg-zinc-800 hover:text-amber-400'
-            }`}
-            title={item.is_favorite ? 'Remove Favorite' : 'Add to Favorites'}
-          >
-            <Star className={`h-3.5 w-3.5 ${item.is_favorite ? 'fill-current' : ''}`} />
           </button>
         </div>
 

@@ -71,3 +71,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to process link' }, { status: 500 });
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  if (searchParams.get('scope') === 'archive') {
+    const deletedCount = db.clearArchive();
+    return NextResponse.json({ ok: true, count: deletedCount });
+  }
+
+  return NextResponse.json({ error: 'Missing or invalid scope' }, { status: 400 });
+}

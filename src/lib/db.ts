@@ -184,6 +184,13 @@ export const db = {
     return Number(result.changes) > 0;
   },
 
+  clearArchive(): number {
+    const database = getDatabase();
+    const stmt = database.prepare('DELETE FROM links WHERE is_archived = 1');
+    const result = stmt.run();
+    return Number(result.changes);
+  },
+
   getStats(): ItemStats {
     const database = getDatabase();
     const inbox = database.prepare('SELECT COUNT(*) as count FROM links WHERE is_archived = 0').get() as { count: number | bigint };
