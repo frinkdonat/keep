@@ -168,11 +168,11 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col selection:bg-indigo-500/20">
+    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col selection:bg-indigo-500/20 relative">
       {/* Streamlined Single-Row Navigation Header */}
       <header className="sticky top-0 z-30 border-b border-zinc-800/80 bg-[#09090b]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2.5 sm:px-6">
-          {/* Logo (No green dot) */}
+          {/* Logo */}
           <div className="flex items-center gap-2.5 flex-shrink-0 mr-4">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/20">
               <Bookmark className="h-4 w-4 fill-white" />
@@ -180,7 +180,7 @@ export default function HomePage() {
             <span className="font-semibold tracking-wider text-sm text-zinc-100">KEEP</span>
           </div>
 
-          {/* Filter Tabs in the Header */}
+          {/* Filter Tabs in Header */}
           <div className="flex-1 flex justify-center sm:justify-start overflow-x-auto">
             <FilterTabs
               activeFilter={filter}
@@ -189,7 +189,7 @@ export default function HomePage() {
             />
           </div>
 
-          {/* Header Right Actions (Clear Archive or Item Count) */}
+          {/* Header Right Actions */}
           <div className="flex items-center gap-3 flex-shrink-0 ml-4">
             {filter === 'archive' && items.length > 0 && (
               <button
@@ -273,6 +273,19 @@ export default function HomePage() {
           </div>
         )}
       </main>
+
+      {/* Floating USU Watermark in Bottom-Right Corner */}
+      <div 
+        className="fixed bottom-4 right-4 z-20 pointer-events-auto opacity-35 hover:opacity-90 transition-opacity duration-300"
+        title="USU"
+      >
+        <img
+          src="/watermark.png"
+          alt="USU"
+          className="h-8 w-8 rounded-lg shadow-lg select-none"
+          loading="eager"
+        />
+      </div>
 
       {/* YouTube Lightbox Modal */}
       <VideoModal

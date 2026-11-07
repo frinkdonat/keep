@@ -17,7 +17,7 @@ export interface KeepItem {
   updated_at: number; // unix timestamp in ms
 }
 
-export type FilterCategory = 'inbox' | 'videos' | 'articles' | 'favorites' | 'archive' | 'all';
+export type FilterCategory = 'inbox' | 'videos' | 'articles' | 'archive' | 'all';
 
 export interface CreateItemInput {
   url: string;
@@ -35,7 +35,6 @@ export interface UpdateItemInput {
   title?: string;
   description?: string;
   is_archived?: boolean | number;
-  is_favorite?: boolean | number;
   notes?: string;
 }
 

@@ -11,9 +11,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const filter = (searchParams.get('filter') || 'inbox') as FilterCategory;
-  const search = searchParams.get('search') || undefined;
 
-  const items = db.getAll(filter, search);
+  const items = db.getAll(filter);
   const stats = db.getStats();
 
   return NextResponse.json({ items, stats });

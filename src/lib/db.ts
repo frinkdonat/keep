@@ -22,9 +22,11 @@ function getDatabase(): DatabaseSync {
   const dbPath = path.join(dataDir, 'keep.db');
   const db = new DatabaseSync(dbPath);
 
-  // Enable WAL mode for better concurrency and performance
+  // Performance optimizations: WAL mode & memory cache
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA synchronous = NORMAL;');
+  db.exec('PRAGMA cache_size = -8000;'); // ~8MB cache
+  db.exec('PRAGMA temp_store = MEMORY;');
 
   // Create links table if not exists
   db.exec(`
@@ -45,9 +47,9 @@ function getDatabase(): DatabaseSync {
       updated_at INTEGER NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_links_created ON links (created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_links_archived ON links (is_archived);
-    CREATE INDEX IF NOT EXISTS idx_links_type ON links (item_type);
+    CREATE INDEX IF NOT EXISTS idx_links_archived_created ON links (is_archived, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_links_type_archived ON links (item_type, is_archived, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_links_url ON links (url);
   `);
 
   global.__keep_db__ = db;
@@ -55,45 +57,31 @@ function getDatabase(): DatabaseSync {
 }
 
 export const db = {
-  getAll(filter: FilterCategory = 'inbox', search?: string): KeepItem[] {
+  getAll(filter: FilterCategory = 'inbox'): KeepItem[] {
     const database = getDatabase();
-    const conditions: string[] = [];
-    const params: (string | number)[] = [];
+    let sql = 'SELECT * FROM links WHERE is_archived = 0 ORDER BY created_at DESC';
 
-    // Filter conditions
     switch (filter) {
-      case 'inbox':
-        conditions.push('is_archived = 0');
-        break;
       case 'videos':
-        conditions.push("item_type = 'youtube' AND is_archived = 0");
+        sql = "SELECT * FROM links WHERE item_type = 'youtube' AND is_archived = 0 ORDER BY created_at DESC";
         break;
       case 'articles':
-        conditions.push("item_type = 'website' AND is_archived = 0");
-        break;
-      case 'favorites':
-        conditions.push('is_favorite = 1 AND is_archived = 0');
+        sql = "SELECT * FROM links WHERE item_type = 'website' AND is_archived = 0 ORDER BY created_at DESC";
         break;
       case 'archive':
-        conditions.push('is_archived = 1');
+        sql = 'SELECT * FROM links WHERE is_archived = 1 ORDER BY created_at DESC';
         break;
       case 'all':
+        sql = 'SELECT * FROM links ORDER BY created_at DESC';
+        break;
+      case 'inbox':
       default:
-        // no extra condition
+        sql = 'SELECT * FROM links WHERE is_archived = 0 ORDER BY created_at DESC';
         break;
     }
 
-    if (search && search.trim()) {
-      const term = `%${search.trim()}%`;
-      conditions.push('(title LIKE ? OR url LIKE ? OR description LIKE ? OR domain LIKE ? OR notes LIKE ?)');
-      params.push(term, term, term, term, term);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const sql = `SELECT * FROM links ${whereClause} ORDER BY created_at DESC`;
-
     const stmt = database.prepare(sql);
-    return stmt.all(...params) as unknown as KeepItem[];
+    return stmt.all() as unknown as KeepItem[];
   },
 
   getById(id: string): KeepItem | null {
@@ -161,10 +149,6 @@ export const db = {
       fields.push('is_archived = ?');
       params.push(input.is_archived ? 1 : 0);
     }
-    if (input.is_favorite !== undefined) {
-      fields.push('is_favorite = ?');
-      params.push(input.is_favorite ? 1 : 0);
-    }
     if (input.notes !== undefined) {
       fields.push('notes = ?');
       params.push(input.notes);
@@ -193,20 +177,29 @@ export const db = {
 
   getStats(): ItemStats {
     const database = getDatabase();
-    const inbox = database.prepare('SELECT COUNT(*) as count FROM links WHERE is_archived = 0').get() as { count: number | bigint };
-    const videos = database.prepare("SELECT COUNT(*) as count FROM links WHERE item_type = 'youtube' AND is_archived = 0").get() as { count: number | bigint };
-    const articles = database.prepare("SELECT COUNT(*) as count FROM links WHERE item_type = 'website' AND is_archived = 0").get() as { count: number | bigint };
-    const favorites = database.prepare('SELECT COUNT(*) as count FROM links WHERE is_favorite = 1 AND is_archived = 0').get() as { count: number | bigint };
-    const archive = database.prepare('SELECT COUNT(*) as count FROM links WHERE is_archived = 1').get() as { count: number | bigint };
-    const total = database.prepare('SELECT COUNT(*) as count FROM links').get() as { count: number | bigint };
+    const statsQuery = database.prepare(`
+      SELECT
+        COUNT(CASE WHEN is_archived = 0 THEN 1 END) as inboxCount,
+        COUNT(CASE WHEN item_type = 'youtube' AND is_archived = 0 THEN 1 END) as videosCount,
+        COUNT(CASE WHEN item_type = 'website' AND is_archived = 0 THEN 1 END) as articlesCount,
+        COUNT(CASE WHEN is_archived = 1 THEN 1 END) as archiveCount,
+        COUNT(*) as totalCount
+      FROM links
+    `).get() as {
+      inboxCount: number | bigint;
+      videosCount: number | bigint;
+      articlesCount: number | bigint;
+      archiveCount: number | bigint;
+      totalCount: number | bigint;
+    };
 
     return {
-      inboxCount: Number(inbox.count),
-      videosCount: Number(videos.count),
-      articlesCount: Number(articles.count),
-      favoritesCount: Number(favorites.count),
-      archiveCount: Number(archive.count),
-      totalCount: Number(total.count),
+      inboxCount: Number(statsQuery.inboxCount),
+      videosCount: Number(statsQuery.videosCount),
+      articlesCount: Number(statsQuery.articlesCount),
+      favoritesCount: 0,
+      archiveCount: Number(statsQuery.archiveCount),
+      totalCount: Number(statsQuery.totalCount),
     };
   }
 };
