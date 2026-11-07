@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keep Extension — Settings</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #09090b;
+      color: #f4f4f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #121215;
+      border: 1px solid #27272a;
+      border-radius: 16px;
+      width: 100%;
+      max-width: 480px;
+      padding: 32px;
+      box-shadow: 0 20px 40px -15px rgba(0,0,0,0.7);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .logo-badge {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 18px;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: #71717a;
+      margin-top: 2px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #a1a1aa;
+      margin-bottom: 8px;
+    }
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      background: #09090b;
+      border: 1px solid #27272a;
+      border-radius: 10px;
+      color: #f4f4f5;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 1px #6366f1;
+    }
+    .hint {
+      font-size: 11px;
+      color: #71717a;
+      margin-top: 6px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 28px;
+    }
+    button {
+      flex: 1;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #4f46e5;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #4338ca;
+    }
+    .btn-secondary {
+      background: #27272a;
+      color: #e4e4e7;
+    }
+    .btn-secondary:hover {
+      background: #3f3f46;
+    }
+    #status-msg {
+      margin-top: 16px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      display: none;
+    }
+    .status-success {
+      display: block !important;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: #34d399;
+    }
+    .status-error {
+      display: block !important;
+      background: rgba(244, 63, 94, 0.1);
+      border: 1px solid rgba(244, 63, 94, 0.2);
+      color: #fb7185;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="logo-badge">K</div>
+      <div>
+        <h1>Keep Settings</h1>
+        <p class="subtitle">Connect this extension to your self-hosted instance</p>
+      </div>
+    </div>
+
+    <form id="settings-form">
+      <div class="form-group">
+        <label for="serverUrl">Keep Server URL</label>
+        <input 
+          type="url" 
+          id="serverUrl" 
+          required 
+          placeholder="http://localhost:3000" 
+          value="http://localhost:3000"
+        >
+        <div class="hint">The URL of your running Keep web app (e.g., http://localhost:3000 or your Tailscale/LAN IP).</div>
+      </div>
+
+      <div class="form-group">
+        <label for="apiKey">API Key</label>
+        <input 
+          type="text" 
+          id="apiKey" 
+          required 
+          placeholder="keep_secret_token_12345"
+          value="keep_secret_token_12345"
+        >
+        <div class="hint">Matches the API_KEY set in your Keep .env file.</div>
+      </div>
+
+      <div id="status-msg"></div>
+
+      <div class="actions">
+        <button type="button" id="btn-test" class="btn-secondary">Test Connection</button>
+        <button type="submit" id="btn-save" class="btn-primary">Save Settings</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
