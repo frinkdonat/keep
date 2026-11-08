@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Keep — 1-Click Watch Later",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Save YouTube videos and interesting websites to your self-hosted Keep library in one click.",
   "permissions": [
     "activeTab",
