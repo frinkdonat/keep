@@ -1,7 +1,7 @@
 name: keep
 services:
   keep:
-    image: ghcr.io/frinkdonat/keep:latest
+    image: frinkdonat/keep:latest
     container_name: keep-app
     restart: unless-stopped
     ports:
