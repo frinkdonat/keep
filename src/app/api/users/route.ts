@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser } from '@/lib/auth';
+import { getAuthenticatedUser, readJsonBounded } from '@/lib/auth';
 import { db } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
+    const body = await readJsonBounded<{ username?: string; password?: string }>(req, 4096);
     const username = String(body.username || '').trim();
     const password = String(body.password || '');
 
@@ -37,9 +37,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!password || password.length < 4) {
+    if (!password || password.length < 4 || password.length > 256) {
       return NextResponse.json(
-        { error: 'Password must be at least 4 characters' },
+        { error: 'Password must be between 4 and 256 characters' },
         { status: 400 }
       );
     }

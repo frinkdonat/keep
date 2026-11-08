@@ -33,6 +33,7 @@ export const ItemCard = memo(function ItemCard({
 
   const isVideo = item.item_type === 'youtube' && Boolean(item.youtube_id);
   const domainLabel = cleanDomain(item.domain) || 'website';
+  const safeHref = /^https?:\/\//i.test(item.url) ? item.url : '#';
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -79,7 +80,7 @@ export const ItemCard = memo(function ItemCard({
         </div>
       ) : (
         <a
-          href={item.url}
+          href={safeHref}
           target="_blank"
           rel="noopener noreferrer"
           className="relative block aspect-video w-full flex-shrink-0 overflow-hidden bg-zinc-950 group/thumb"
@@ -163,7 +164,7 @@ export const ItemCard = memo(function ItemCard({
               </button>
             ) : (
               <a
-                href={item.url}
+                href={safeHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-indigo-300 transition-colors"
@@ -222,7 +223,7 @@ export const ItemCard = memo(function ItemCard({
 
           {/* External link */}
           <a
-            href={item.url}
+            href={safeHref}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-lg p-1.5 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors"

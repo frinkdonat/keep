@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthenticatedUser } from '@/lib/auth';
+import { getAuthenticatedUser, readJsonBounded } from '@/lib/auth';
 import { db } from '@/lib/db';
 
 export async function PATCH(
@@ -20,13 +20,16 @@ export async function PATCH(
   }
 
   try {
-    const body = await req.json();
+    const body = await readJsonBounded<{ password?: string; regenerateApiKey?: boolean }>(
+      req,
+      4096
+    );
     const password = body.password ? String(body.password) : undefined;
     const regenerateApiKey = Boolean(body.regenerateApiKey);
 
-    if (password !== undefined && password.length < 4) {
+    if (password !== undefined && (password.length < 4 || password.length > 256)) {
       return NextResponse.json(
-        { error: 'Password must be at least 4 characters' },
+        { error: 'Password must be between 4 and 256 characters' },
         { status: 400 }
       );
     }

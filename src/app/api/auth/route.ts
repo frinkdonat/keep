@@ -7,6 +7,7 @@ import {
   checkRateLimit,
   recordFailedAttempt,
   clearFailedAttempts,
+  readJsonBounded,
 } from '@/lib/auth';
 import { db, verifyPassword, hashPassword } from '@/lib/db';
 
@@ -55,9 +56,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
-    const inputUser = String(body.username || '').trim();
-    const inputPass = String(body.password || '');
+    const body = await readJsonBounded<{ username?: string; password?: string }>(req, 4096);
+    const inputUser = String(body.username || '').trim().slice(0, 64);
+    const inputPass = String(body.password || '').slice(0, 256);
 
     const user = inputUser ? db.getUserByUsername(inputUser) : null;
 
@@ -84,8 +85,13 @@ export async function POST(req: NextRequest) {
         apiKey: user.api_key,
       });
 
+      const isHttps =
+        req.nextUrl.protocol === 'https:' ||
+        req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() === 'https';
+
       response.cookies.set('keep_session', token, {
         httpOnly: true,
+        secure: isHttps,
         sameSite: 'lax',
         path: '/',
         maxAge: 60 * 60 * 24 * 365, // 1 year

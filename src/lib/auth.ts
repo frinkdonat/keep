@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import crypto from 'node:crypto';
-import { db, getEnvAdminConfig } from './db';
+import { db, getEnvAdminConfig, computeSessionToken, CachedUser } from './db';
 import { UserRecord } from './types';
 
 export { getEnvAdminConfig };
@@ -16,43 +16,87 @@ export function safeCompare(a: string, b: string): boolean {
 }
 
 /**
- * Generates an HMAC-SHA256 signed session cookie token bound to a specific user's credentials.
- * Format: `${user.id}.${hmac}`
- * Changing a user's password or deleting the user immediately invalidates their session.
+ * Returns the pre-computed HMAC-SHA256 session cookie token for a user,
+ * or computes it if passed a raw UserRecord.
  */
-export function createSessionToken(user: UserRecord): string {
-  const sig = crypto
-    .createHmac('sha256', `keep_user_hmac:${user.password_hash}:${user.api_key}`)
-    .update(`session_v2:${user.id}:${user.username}`)
-    .digest('hex');
-  return `${user.id}.${sig}`;
+export function createSessionToken(user: UserRecord | CachedUser): string {
+  if ('sessionToken' in user && typeof user.sessionToken === 'string') {
+    return user.sessionToken;
+  }
+  return computeSessionToken(user).token;
 }
 
-export function verifySessionCookie(cookieValue: string | undefined): UserRecord | null {
-  if (!cookieValue) return null;
+/**
+ * O(1) zero-allocation session cookie verification using pre-computed HMAC buffers.
+ */
+export function verifySessionCookie(cookieValue: string | undefined): CachedUser | null {
+  if (!cookieValue || cookieValue.length > 256) return null;
   const dotIdx = cookieValue.indexOf('.');
   if (dotIdx <= 0) return null;
 
   const userId = cookieValue.slice(0, dotIdx);
-  const sig = cookieValue.slice(dotIdx + 1);
+  const sigHex = cookieValue.slice(dotIdx + 1);
+
+  // SHA-256 hex digest is always exactly 64 hex chars (32 bytes)
+  if (sigHex.length !== 64 || !/^[0-9a-f]{64}$/i.test(sigHex)) return null;
 
   const user = db.getUserById(userId);
   if (!user) return null;
 
-  const expected = createSessionToken(user);
-  const expectedSig = expected.slice(dotIdx + 1);
+  const sigBuf = Buffer.from(sigHex, 'hex');
+  if (sigBuf.length !== user.sessionSigBuf.length) return null;
 
-  if (safeCompare(sig, expectedSig)) {
+  if (crypto.timingSafeEqual(sigBuf, user.sessionSigBuf)) {
     return user;
   }
   return null;
 }
 
 /**
+ * CSRF protection for cookie-authenticated state-changing requests (POST, PATCH, DELETE).
+ * API Key clients (Chrome Extension) are exempt because custom headers cannot be sent cross-site without CORS preflight.
+ */
+export function verifyCsrfOrigin(req: NextRequest): boolean {
+  const method = req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return true;
+  }
+
+  // Modern browsers send Sec-Fetch-Site on all requests
+  const secFetchSite = req.headers.get('sec-fetch-site');
+  if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
+    // Allow Chrome extension origins
+    const origin = req.headers.get('origin') || '';
+    if (!origin.startsWith('chrome-extension://') && !origin.startsWith('moz-extension://')) {
+      return false;
+    }
+  }
+
+  const origin = req.headers.get('origin');
+  if (origin) {
+    if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+      return true;
+    }
+    try {
+      const originHost = new URL(origin).host.toLowerCase();
+      const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim().toLowerCase();
+      const host = (forwardedHost || req.headers.get('host') || '').toLowerCase();
+      if (host && originHost !== host) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Resolves the authenticated UserRecord from either API Key header (Chrome Extension)
  * or signed HttpOnly session cookie (Web UI).
  */
-export function getAuthenticatedUser(req: NextRequest): UserRecord | null {
+export function getAuthenticatedUser(req: NextRequest): CachedUser | null {
   // 1. Check API Key header (Chrome Extension or API client)
   const authHeader = req.headers.get('authorization');
   const xApiKey = req.headers.get('x-api-key');
@@ -65,44 +109,70 @@ export function getAuthenticatedUser(req: NextRequest): UserRecord | null {
   }
 
   if (token) {
+    if (token.length > 256) return null;
+    const ip = getClientIp(req);
+    const rate = checkRateLimit(ip);
+    if (!rate.allowed) return null;
+
     const user = db.getUserByApiKey(token);
-    if (user && safeCompare(token, user.api_key)) {
-      return user;
+    if (user) {
+      const tokenHash = crypto.createHash('sha256').update(token).digest();
+      if (
+        tokenHash.length === user.apiKeyHashBuf.length &&
+        crypto.timingSafeEqual(tokenHash, user.apiKeyHashBuf)
+      ) {
+        return user;
+      }
     }
+    recordFailedAttempt(ip);
+    return null;
   }
 
-  // 2. Check signed web session cookie
+  // 2. Check signed web session cookie (+ CSRF Origin verification for mutations)
   const sessionCookie = req.cookies.get('keep_session');
-  return verifySessionCookie(sessionCookie?.value);
+  const user = verifySessionCookie(sessionCookie?.value);
+  if (!user) return null;
+
+  if (!verifyCsrfOrigin(req)) {
+    return null;
+  }
+
+  return user;
 }
 
 export function isAuthorized(req: NextRequest): boolean {
   return getAuthenticatedUser(req) !== null;
 }
 
-// Brute-force protection (in-memory rate limiter per IP)
+// Bounded LRU Brute-force protection (prevents memory exhaustion DoS from spoofed IPs)
 interface RateLimitEntry {
   count: number;
   resetAt: number;
 }
 
-const MAX_ATTEMPTS = 6;
+const MAX_ATTEMPTS = 8;
 const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_TRACKED_IPS = 2000;
 const loginAttempts = new Map<string, RateLimitEntry>();
 
 export function getClientIp(req: NextRequest): string {
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
-    return forwarded.split(',')[0].trim();
+    return forwarded.split(',')[0].trim().slice(0, 64);
   }
-  return req.headers.get('x-real-ip') || 'local';
+  return (req.headers.get('x-real-ip') || 'local').slice(0, 64);
 }
 
 export function checkRateLimit(ip: string): { allowed: boolean; retryAfterSeconds: number } {
   const now = Date.now();
   const entry = loginAttempts.get(ip);
 
-  if (!entry || now > entry.resetAt) {
+  if (!entry) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+
+  if (now > entry.resetAt) {
+    loginAttempts.delete(ip);
     return { allowed: true, retryAfterSeconds: 0 };
   }
 
@@ -119,12 +189,37 @@ export function recordFailedAttempt(ip: string): void {
   const entry = loginAttempts.get(ip);
 
   if (!entry || now > entry.resetAt) {
+    if (loginAttempts.size >= MAX_TRACKED_IPS) {
+      const oldestKey = loginAttempts.keys().next().value;
+      if (oldestKey) loginAttempts.delete(oldestKey);
+    }
     loginAttempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
   } else {
-    entry.count += 1;
+    // Refresh LRU order
+    loginAttempts.delete(ip);
+    loginAttempts.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
   }
 }
 
 export function clearFailedAttempts(ip: string): void {
   loginAttempts.delete(ip);
+}
+
+/**
+ * Safely parses JSON request bodies with a strict byte-size cap (default 8KB)
+ * to prevent memory exhaustion / DoS attacks.
+ */
+export async function readJsonBounded<T = Record<string, unknown>>(
+  req: NextRequest,
+  maxBytes = 8192
+): Promise<T> {
+  const contentLength = req.headers.get('content-length');
+  if (contentLength && Number(contentLength) > maxBytes) {
+    throw new Error('Payload too large');
+  }
+  const text = await req.text();
+  if (text.length > maxBytes) {
+    throw new Error('Payload too large');
+  }
+  return JSON.parse(text) as T;
 }

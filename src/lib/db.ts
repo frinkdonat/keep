@@ -19,6 +19,12 @@ export const DUMMY_DEFAULTS = {
   API_KEY: 'keep_secret_api_key',
 };
 
+export interface CachedUser extends UserRecord {
+  sessionToken: string;
+  sessionSigBuf: Buffer;
+  apiKeyHashBuf: Buffer;
+}
+
 export function getEnvAdminConfig() {
   let rawUser =
     process.env.KEEP_USERNAME ||
@@ -72,6 +78,20 @@ export function generateApiKey(): string {
   return 'keep_sec_' + crypto.randomBytes(24).toString('hex');
 }
 
+export function computeSessionToken(user: UserRecord): {
+  token: string;
+  sigBuf: Buffer;
+} {
+  const sigHex = crypto
+    .createHmac('sha256', `keep_user_hmac:${user.password_hash}:${user.api_key}`)
+    .update(`session_v2:${user.id}:${user.username}`)
+    .digest('hex');
+  return {
+    token: `${user.id}.${sigHex}`,
+    sigBuf: Buffer.from(sigHex, 'hex'),
+  };
+}
+
 interface PreparedStatements {
   getAllUsersWithCounts: StatementSync;
   insertUser: StatementSync;
@@ -91,6 +111,7 @@ interface PreparedStatements {
   getLinkByUrl: StatementSync;
   insertLink: StatementSync;
   enrichLinkMeta: StatementSync;
+  updateLinkArchive: StatementSync;
   deleteLinkById: StatementSync;
   clearUserArchive: StatementSync;
   getUserStats: StatementSync;
@@ -99,9 +120,10 @@ interface PreparedStatements {
 interface DbContext {
   database: DatabaseSync;
   stmts: PreparedStatements;
-  usersById: Map<string, UserRecord>;
-  usersByUsername: Map<string, UserRecord>;
-  usersByApiKey: Map<string, UserRecord>;
+  usersById: Map<string, CachedUser>;
+  usersByUsername: Map<string, CachedUser>;
+  usersByApiKey: Map<string, CachedUser>;
+  userRevisions: Map<string, number>;
 }
 
 declare global {
@@ -111,9 +133,9 @@ declare global {
 
 function rebuildUserCache(
   database: DatabaseSync,
-  usersById: Map<string, UserRecord>,
-  usersByUsername: Map<string, UserRecord>,
-  usersByApiKey: Map<string, UserRecord>
+  usersById: Map<string, CachedUser>,
+  usersByUsername: Map<string, CachedUser>,
+  usersByApiKey: Map<string, CachedUser>
 ) {
   usersById.clear();
   usersByUsername.clear();
@@ -121,10 +143,22 @@ function rebuildUserCache(
 
   const rows = database.prepare('SELECT * FROM users').all() as unknown as UserRecord[];
   for (const u of rows) {
-    usersById.set(u.id, u);
-    usersByUsername.set(u.username.toLowerCase(), u);
-    usersByApiKey.set(u.api_key, u);
+    const { token, sigBuf } = computeSessionToken(u);
+    const cached: CachedUser = {
+      ...u,
+      sessionToken: token,
+      sessionSigBuf: sigBuf,
+      apiKeyHashBuf: crypto.createHash('sha256').update(u.api_key).digest(),
+    };
+    usersById.set(u.id, cached);
+    usersByUsername.set(u.username.toLowerCase(), cached);
+    usersByApiKey.set(u.api_key, cached);
   }
+}
+
+function bumpRevision(ctx: DbContext, userId: string): void {
+  const current = ctx.userRevisions.get(userId) || 1;
+  ctx.userRevisions.set(userId, current + 1);
 }
 
 function getContext(): DbContext {
@@ -288,6 +322,11 @@ function getContext(): DbContext {
       SET title = ?, description = ?, image_url = ?, favicon_url = ?, updated_at = ?
       WHERE id = ? AND user_id = ?
     `),
+    updateLinkArchive: database.prepare(`
+      UPDATE links
+      SET is_archived = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `),
     deleteLinkById: database.prepare('DELETE FROM links WHERE id = ? AND user_id = ?'),
     clearUserArchive: database.prepare(
       'DELETE FROM links WHERE user_id = ? AND is_archived = 1'
@@ -304,9 +343,10 @@ function getContext(): DbContext {
     `),
   };
 
-  const usersById = new Map<string, UserRecord>();
-  const usersByUsername = new Map<string, UserRecord>();
-  const usersByApiKey = new Map<string, UserRecord>();
+  const usersById = new Map<string, CachedUser>();
+  const usersByUsername = new Map<string, CachedUser>();
+  const usersByApiKey = new Map<string, CachedUser>();
+  const userRevisions = new Map<string, number>();
   rebuildUserCache(database, usersById, usersByUsername, usersByApiKey);
 
   const ctx: DbContext = {
@@ -315,6 +355,7 @@ function getContext(): DbContext {
     usersById,
     usersByUsername,
     usersByApiKey,
+    userRevisions,
   };
 
   global.__keep_db_ctx__ = ctx;
@@ -322,17 +363,21 @@ function getContext(): DbContext {
 }
 
 export const db = {
-  // --- O(1) IN-MEMORY USER LOOKUPS ---
-  getUserById(id: string): UserRecord | null {
+  // --- O(1) IN-MEMORY USER & REVISION LOOKUPS ---
+  getUserById(id: string): CachedUser | null {
     return getContext().usersById.get(id) || null;
   },
 
-  getUserByUsername(username: string): UserRecord | null {
+  getUserByUsername(username: string): CachedUser | null {
     return getContext().usersByUsername.get(username.trim().toLowerCase()) || null;
   },
 
-  getUserByApiKey(apiKey: string): UserRecord | null {
+  getUserByApiKey(apiKey: string): CachedUser | null {
     return getContext().usersByApiKey.get(apiKey.trim()) || null;
+  },
+
+  getUserRevision(userId: string): number {
+    return getContext().userRevisions.get(userId) || 1;
   },
 
   getAllUsers(): PublicUser[] {
@@ -419,6 +464,7 @@ export const db = {
     const ctx = getContext();
     ctx.stmts.deleteUserLinks.run(id);
     const result = ctx.stmts.deleteUserById.run(id);
+    ctx.userRevisions.delete(id);
     rebuildUserCache(ctx.database, ctx.usersById, ctx.usersByUsername, ctx.usersByApiKey);
     return Number(result.changes) > 0;
   },
@@ -463,7 +509,7 @@ export const db = {
   },
 
   create(input: CreateItemInput): KeepItem {
-    const { stmts } = getContext();
+    const ctx = getContext();
     const id = crypto.randomUUID();
     const now = Date.now();
 
@@ -485,7 +531,7 @@ export const db = {
       updated_at: now,
     };
 
-    stmts.insertLink.run(
+    ctx.stmts.insertLink.run(
       item.id,
       item.user_id,
       item.url,
@@ -501,6 +547,7 @@ export const db = {
       item.updated_at
     );
 
+    bumpRevision(ctx, input.user_id);
     return item;
   },
 
@@ -514,8 +561,8 @@ export const db = {
       favicon_url: string | null;
     }
   ): void {
-    const { stmts } = getContext();
-    stmts.enrichLinkMeta.run(
+    const ctx = getContext();
+    ctx.stmts.enrichLinkMeta.run(
       meta.title,
       meta.description,
       meta.image_url,
@@ -524,10 +571,27 @@ export const db = {
       id,
       userId
     );
+    bumpRevision(ctx, userId);
   },
 
   update(userId: string, id: string, input: UpdateItemInput): KeepItem | null {
-    const { database } = getContext();
+    const ctx = getContext();
+
+    // Fast path for the most frequent operation: toggling archive status
+    if (
+      input.is_archived !== undefined &&
+      input.title === undefined &&
+      input.description === undefined &&
+      input.notes === undefined
+    ) {
+      const now = Date.now();
+      const archivedVal = input.is_archived ? 1 : 0;
+      const res = ctx.stmts.updateLinkArchive.run(archivedVal, now, id, userId);
+      if (Number(res.changes) === 0) return null;
+      bumpRevision(ctx, userId);
+      return this.getById(userId, id);
+    }
+
     const existing = this.getById(userId, id);
     if (!existing) return null;
 
@@ -553,21 +617,26 @@ export const db = {
 
     params.push(id, userId);
     const sql = `UPDATE links SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`;
-    database.prepare(sql).run(...params);
+    ctx.database.prepare(sql).run(...params);
+    bumpRevision(ctx, userId);
 
     return this.getById(userId, id);
   },
 
   delete(userId: string, id: string): boolean {
-    const { stmts } = getContext();
-    const result = stmts.deleteLinkById.run(id, userId);
-    return Number(result.changes) > 0;
+    const ctx = getContext();
+    const result = ctx.stmts.deleteLinkById.run(id, userId);
+    const changed = Number(result.changes) > 0;
+    if (changed) bumpRevision(ctx, userId);
+    return changed;
   },
 
   clearArchive(userId: string): number {
-    const { stmts } = getContext();
-    const result = stmts.clearUserArchive.run(userId);
-    return Number(result.changes) > 0 ? Number(result.changes) : 0;
+    const ctx = getContext();
+    const result = ctx.stmts.clearUserArchive.run(userId);
+    const count = Number(result.changes) > 0 ? Number(result.changes) : 0;
+    if (count > 0) bumpRevision(ctx, userId);
+    return count;
   },
 
   getStats(userId: string): ItemStats {
