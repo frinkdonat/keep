@@ -39,7 +39,7 @@ export function FilterTabs({ activeFilter, onFilterChange, stats }: FilterTabsPr
   ];
 
   return (
-    <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+    <div className="inline-flex items-center gap-1 rounded-xl border border-white/[0.06] bg-[#101015]/80 p-1">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeFilter === tab.id;
@@ -47,20 +47,21 @@ export function FilterTabs({ activeFilter, onFilterChange, stats }: FilterTabsPr
         return (
           <button
             key={tab.id}
+            type="button"
             onClick={() => onFilterChange(tab.id)}
-            className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
+            className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer select-none ${
               isActive
-                ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700/80'
-                : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                ? 'bg-white/[0.09] text-zinc-100 shadow-sm'
+                : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200'
             }`}
           >
-            <Icon className={`h-3.5 w-3.5 ${isActive ? 'text-indigo-400' : 'text-zinc-400'}`} />
+            <Icon className={`h-3.5 w-3.5 ${isActive ? 'text-indigo-400' : 'text-zinc-500'}`} />
             <span>{tab.label}</span>
             <span
-              className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+              className={`min-w-[20px] rounded-md px-1.5 py-0.5 text-center text-[10px] font-mono tabular-nums transition-colors ${
                 isActive
-                  ? 'bg-zinc-700 text-zinc-200'
-                  : 'bg-zinc-900 text-zinc-500'
+                  ? 'bg-indigo-500/20 text-indigo-300'
+                  : 'bg-white/[0.04] text-zinc-500'
               }`}
             >
               {tab.count}

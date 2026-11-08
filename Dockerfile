@@ -29,11 +29,13 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 ENV DATA_DIR=/app/data
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# Default dummy credentials (override via Docker environment variables)
+ENV USERNAME="admin"
+ENV PASSWORD="changeme"
+ENV API_KEY="keep_secret_api_key"
 
-# Ensure data directory exists and has permissions
-RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
+# Ensure data directory exists
+RUN mkdir -p /app/data
 
 # Copy build artifacts
 COPY --from=builder /app/public ./public

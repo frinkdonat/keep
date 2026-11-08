@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Keep — Minimalist Watch Later',
-  description: 'A fabulous, stripped-down watch later & bookmarking library for YouTube videos and web discoveries.',
+  title: 'Keep',
+  description: 'Minimalist self-hosted watch later & bookmarking library.',
 };
 
 export default function RootLayout({
@@ -24,7 +24,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-[#09090b] text-zinc-100 antialiased selection:bg-indigo-500/30 selection:text-indigo-200`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-[#08080a] text-zinc-100 antialiased selection:bg-indigo-500/30 selection:text-indigo-200`}>
         {children}
       </body>
     </html>

@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Keep',
+  title: 'Keep',
   description: 'Privacy policy for Keep and the Keep Chrome extension.',
 };
 

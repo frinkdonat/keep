@@ -6,8 +6,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - API_KEY=${API_KEY:-keep_sec_43d2140f76b3aee82c32c4f11e49b950ebe0d355d82e937b}
-      - MASTER_PASSCODE=${MASTER_PASSCODE:-}
+      - USERNAME=${USERNAME:-admin}
+      - PASSWORD=${PASSWORD:-changeme}
+      - API_KEY=${API_KEY:-keep_secret_api_key}
       - DATA_DIR=/app/data
       - NODE_ENV=production
     volumes:

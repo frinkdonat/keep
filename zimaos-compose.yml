@@ -7,19 +7,23 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - API_KEY=keep_sec_43d2140f76b3aee82c32c4f11e49b950ebe0d355d82e937b
-      - MASTER_PASSCODE=
+      - USERNAME=admin
+      - PASSWORD=changeme
+      - API_KEY=keep_secret_api_key
       - DATA_DIR=/app/data
     volumes:
       - /DATA/AppData/keep/data:/app/data
     x-casaos:
       envs:
+        - container: USERNAME
+          description:
+            en_us: Web UI login username
+        - container: PASSWORD
+          description:
+            en_us: Web UI login password
         - container: API_KEY
           description:
             en_us: Secret token for Chrome Extension
-        - container: MASTER_PASSCODE
-          description:
-            en_us: Optional master passcode for Web UI
       ports:
         - container: "3000"
           description:
@@ -31,14 +35,13 @@ services:
 x-casaos:
   architectures:
     - amd64
-    - arm64
   main: keep
   author: frinkdonat
   category: Utilities
   description:
     en_us: Minimalist, stripped-down watch later & curated bookmarking app with 1-click Chrome Extension.
   developer: USU
-  icon: https://raw.githubusercontent.com/frinkdonat/keep/main/public/watermark.png
+  icon: https://raw.githubusercontent.com/frinkdonat/keep/main/public/icon.png
   title:
     en_us: Keep
   index: /

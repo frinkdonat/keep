@@ -22,13 +22,14 @@ function getDatabase(): DatabaseSync {
   const dbPath = path.join(dataDir, 'keep.db');
   const db = new DatabaseSync(dbPath);
 
-  // Performance optimizations: WAL mode & memory cache
+  // Performance optimizations: WAL mode, memory cache & mmap
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA synchronous = NORMAL;');
-  db.exec('PRAGMA cache_size = -8000;'); // ~8MB cache
+  db.exec('PRAGMA cache_size = -16000;'); // ~16MB in-memory cache
   db.exec('PRAGMA temp_store = MEMORY;');
+  db.exec('PRAGMA mmap_size = 67108864;'); // 64MB memory-mapped I/O
 
-  // Create links table if not exists
+  // Create links & server settings tables
   db.exec(`
     CREATE TABLE IF NOT EXISTS links (
       id TEXT PRIMARY KEY,
@@ -45,6 +46,11 @@ function getDatabase(): DatabaseSync {
       notes TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_links_archived_created ON links (is_archived, created_at DESC);
@@ -201,5 +207,20 @@ export const db = {
       archiveCount: Number(statsQuery.archiveCount),
       totalCount: Number(statsQuery.totalCount),
     };
+  },
+
+  isSetupCompleted(): boolean {
+    const database = getDatabase();
+    const row = database
+      .prepare("SELECT value FROM settings WHERE key = 'onboarding_completed'")
+      .get() as { value: string } | undefined;
+    return row?.value === '1';
+  },
+
+  markSetupCompleted(): void {
+    const database = getDatabase();
+    database
+      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('onboarding_completed', '1')")
+      .run();
   }
 };
