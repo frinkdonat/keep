@@ -136,6 +136,7 @@ export function PasscodeLock({ onSuccess }: PasscodeLockProps) {
           alt=""
           className="h-7 w-7 rounded-lg"
           draggable={false}
+          decoding="async"
         />
       </div>
     </div>

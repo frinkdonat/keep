@@ -38,6 +38,14 @@ export function OnboardingModal({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onComplete();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onComplete]);
+
   const handleFinish = async () => {
     setSubmitting(true);
     try {
