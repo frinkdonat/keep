@@ -52,6 +52,7 @@ export function KeepDashboard({
   // Modals
   const [selectedVideo, setSelectedVideo] = useState<KeepItem | null>(null);
   const [isUsersModalOpen, setIsUsersModalOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Pre-hydrated Auth & First-Time Setup State (0 client roundtrips on initial load)
   const [needsAuth, setNeedsAuth] = useState(!authenticated);
@@ -103,6 +104,35 @@ export function KeepDashboard({
       window.removeEventListener('focus', onVisibilityOrFocus);
       document.removeEventListener('visibilitychange', onVisibilityOrFocus);
     };
+  }, [needsAuth, loadItems]);
+
+  // Handle Mobile PWA Share Target feedback & pending saves
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('saved') === '1') {
+      setToastMessage('Saved to Keep');
+      loadItems(true);
+      window.history.replaceState({}, '', window.location.pathname);
+      const timer = setTimeout(() => setToastMessage(null), 3500);
+      return () => clearTimeout(timer);
+    }
+
+    const pendingUrl = params.get('pending_save');
+    if (pendingUrl && !needsAuth) {
+      window.history.replaceState({}, '', window.location.pathname);
+      fetch('/api/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: pendingUrl }),
+      })
+        .then(() => {
+          setToastMessage('Saved to Keep');
+          loadItems(true);
+          setTimeout(() => setToastMessage(null), 3500);
+        })
+        .catch(() => {});
+    }
   }, [needsAuth, loadItems]);
 
   // Instant 0ms in-memory stats calculation
@@ -385,6 +415,14 @@ export function KeepDashboard({
           </div>
         )}
       </main>
+
+      {/* Toast Notification (e.g. for Mobile Share Target & Actions) */}
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-[#0d1512]/95 px-4 py-2 text-xs font-medium text-emerald-300 shadow-2xl shadow-black/80 backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
 
       {/* Static Baked-in USU Watermark in Bottom-Right Corner (Non-interactive) */}
       <div className="fixed bottom-4 right-4 z-10 pointer-events-none select-none opacity-25">

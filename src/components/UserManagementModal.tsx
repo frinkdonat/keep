@@ -14,12 +14,31 @@ import {
   Key,
   Loader2,
   AlertCircle,
+  Database,
+  Download,
+  Sparkles,
+  HardDrive,
 } from 'lucide-react';
 import { PublicUser } from '@/lib/types';
 
 interface UserManagementModalProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+interface DbInfo {
+  dbSizeBytes: number;
+  walSizeBytes: number;
+  backupCount: number;
+  lastBackupDate: string | null;
+  lastMaintenanceTime: number | null;
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 export function UserManagementModal({ isOpen, onClose }: UserManagementModalProps) {
@@ -31,13 +50,26 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   const [errorMsg, setErrorMsg] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const loadUsers = useCallback(async () => {
+  // SQLite Maintenance & Backup state
+  const [dbInfo, setDbInfo] = useState<DbInfo | null>(null);
+  const [runningMaintenance, setRunningMaintenance] = useState(false);
+  const [maintenanceSuccess, setMaintenanceSuccess] = useState(false);
+
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/users');
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users || []);
+      const [usersRes, dbRes] = await Promise.all([
+        fetch('/api/users'),
+        fetch('/api/admin/maintenance'),
+      ]);
+
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        setUsers(usersData.users || []);
+      }
+      if (dbRes.ok) {
+        const dbData = await dbRes.json();
+        setDbInfo(dbData.info || null);
       }
     } catch {
       // ignore
@@ -48,12 +80,13 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
 
   useEffect(() => {
     if (isOpen) {
-      loadUsers();
+      loadData();
       setUsername('');
       setPassword('');
       setErrorMsg('');
+      setMaintenanceSuccess(false);
     }
-  }, [isOpen, loadUsers]);
+  }, [isOpen, loadData]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -132,7 +165,7 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
     try {
       await fetch(`/api/users/${u.id}`, { method: 'DELETE' });
     } catch {
-      loadUsers();
+      loadData();
     }
   };
 
@@ -142,13 +175,34 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleRunMaintenance = async () => {
+    setRunningMaintenance(true);
+    try {
+      const res = await fetch('/api/admin/maintenance', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.info) setDbInfo(data.info);
+        setMaintenanceSuccess(true);
+        setTimeout(() => setMaintenanceSuccess(false), 3000);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setRunningMaintenance(false);
+    }
+  };
+
+  const handleDownloadBackup = () => {
+    window.location.href = '/api/admin/backup';
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"
       onClick={onClose}
     >
       <div
-        className="relative flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101015] shadow-2xl shadow-black/90"
+        className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101015] shadow-2xl shadow-black/90"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -158,9 +212,9 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
               <Users className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-zinc-100">User Workspaces</h2>
+              <h2 className="text-base font-semibold text-zinc-100">Admin Control Center</h2>
               <p className="text-xs text-zinc-400">
-                Manage isolated accounts and personal Chrome Extension API keys
+                User workspaces, security keys, and SQLite database maintenance
               </p>
             </div>
           </div>
@@ -327,6 +381,88 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
                 })}
               </div>
             )}
+          </div>
+
+          {/* SQLite Database Maintenance & Backups Section */}
+          <div className="rounded-xl border border-white/[0.07] bg-[#0b0b0f] p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                <Database className="h-3.5 w-3.5 text-indigo-400" />
+                <span>SQLite Maintenance & Backups</span>
+              </div>
+              <span className="text-[11px] text-zinc-500 font-mono">
+                Auto-optimized every 6h
+              </span>
+            </div>
+
+            {/* Storage Info Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <div className="rounded-lg border border-white/[0.05] bg-[#121218] p-3">
+                <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 block">
+                  Database Size
+                </span>
+                <span className="text-sm font-semibold text-zinc-200 font-mono mt-0.5 block">
+                  {dbInfo ? formatBytes(dbInfo.dbSizeBytes) : '...'}
+                </span>
+              </div>
+
+              <div className="rounded-lg border border-white/[0.05] bg-[#121218] p-3">
+                <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 block">
+                  WAL Journal
+                </span>
+                <span className="text-sm font-semibold text-zinc-200 font-mono mt-0.5 block">
+                  {dbInfo ? formatBytes(dbInfo.walSizeBytes) : '...'}
+                </span>
+              </div>
+
+              <div className="col-span-2 sm:col-span-1 rounded-lg border border-white/[0.05] bg-[#121218] p-3">
+                <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 block">
+                  Rolling Backups
+                </span>
+                <span className="text-sm font-semibold text-zinc-200 font-mono mt-0.5 block truncate">
+                  {dbInfo
+                    ? `${dbInfo.backupCount} saved${
+                        dbInfo.lastBackupDate ? ` (${dbInfo.lastBackupDate})` : ''
+                      }`
+                    : '...'}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={handleRunMaintenance}
+                disabled={runningMaintenance}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-xs font-medium text-zinc-300 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+              >
+                {runningMaintenance ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-400" />
+                ) : maintenanceSuccess ? (
+                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+                )}
+                <span>
+                  {runningMaintenance
+                    ? 'Optimizing...'
+                    : maintenanceSuccess
+                    ? 'Optimized & Checkpointed!'
+                    : 'Run Optimization & Flush WAL'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadBackup}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-600/15 px-3.5 py-2 text-xs font-medium text-indigo-300 hover:bg-indigo-600/25 hover:text-indigo-200 transition-colors cursor-pointer"
+                title="Download atomic snapshot of the SQLite database to your machine"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Download Database Backup (.db)</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

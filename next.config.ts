@@ -8,6 +8,8 @@ const cspHeader = [
   "font-src 'self' https: data:",
   "frame-src https://www.youtube.com https://www.youtube-nocookie.com",
   "connect-src 'self'",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

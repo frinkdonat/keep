@@ -129,6 +129,10 @@ interface DbContext {
 declare global {
   // eslint-disable-next-line no-var
   var __keep_db_ctx__: DbContext | undefined;
+  // eslint-disable-next-line no-var
+  var __keep_maintenance_timer__: NodeJS.Timeout | undefined;
+  // eslint-disable-next-line no-var
+  var __keep_last_maintenance_time__: number | undefined;
 }
 
 function rebuildUserCache(
@@ -159,6 +163,116 @@ function rebuildUserCache(
 function bumpRevision(ctx: DbContext, userId: string): void {
   const current = ctx.userRevisions.get(userId) || 1;
   ctx.userRevisions.set(userId, current + 1);
+}
+
+export function runMaintenance(): { success: boolean; timeMs: number } {
+  const start = Date.now();
+  try {
+    const ctx = getContext();
+    ctx.database.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    ctx.database.exec('PRAGMA optimize;');
+    ctx.database.exec('PRAGMA quick_check;');
+    global.__keep_last_maintenance_time__ = Date.now();
+    return { success: true, timeMs: Date.now() - start };
+  } catch (err) {
+    console.error('SQLite maintenance error:', err);
+    return { success: false, timeMs: Date.now() - start };
+  }
+}
+
+export function createDailyBackup(): { success: boolean; filePath?: string; error?: string } {
+  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+  const backupsDir = path.join(dataDir, 'backups');
+  if (!fs.existsSync(backupsDir)) {
+    fs.mkdirSync(backupsDir, { recursive: true });
+  }
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const backupPath = path.join(backupsDir, `keep-backup-${dateStr}.db`);
+
+  try {
+    const ctx = getContext();
+    if (fs.existsSync(backupPath)) {
+      try {
+        fs.unlinkSync(backupPath);
+      } catch {}
+    }
+
+    const safePath = backupPath.replace(/'/g, "''");
+    ctx.database.exec(`VACUUM INTO '${safePath}';`);
+
+    // Rotate: keep only the 3 most recent backups
+    const files = fs
+      .readdirSync(backupsDir)
+      .filter((f) => f.startsWith('keep-backup-') && f.endsWith('.db'))
+      .sort();
+
+    while (files.length > 3) {
+      const oldest = files.shift();
+      if (oldest) {
+        try {
+          fs.unlinkSync(path.join(backupsDir, oldest));
+        } catch {}
+      }
+    }
+
+    return { success: true, filePath: backupPath };
+  } catch (err) {
+    console.error('SQLite backup creation error:', err);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export function checkAndRunDailyBackup(): void {
+  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+  const backupsDir = path.join(dataDir, 'backups');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const backupPath = path.join(backupsDir, `keep-backup-${dateStr}.db`);
+
+  if (!fs.existsSync(backupPath)) {
+    createDailyBackup();
+  }
+}
+
+export function getDatabaseInfo() {
+  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+  const dbPath = path.join(dataDir, 'keep.db');
+  const walPath = path.join(dataDir, 'keep.db-wal');
+  const backupsDir = path.join(dataDir, 'backups');
+
+  let dbSizeBytes = 0;
+  let walSizeBytes = 0;
+  try {
+    if (fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
+  } catch {}
+  try {
+    if (fs.existsSync(walPath)) walSizeBytes = fs.statSync(walPath).size;
+  } catch {}
+
+  let backupCount = 0;
+  let lastBackupDate: string | null = null;
+  try {
+    if (fs.existsSync(backupsDir)) {
+      const files = fs
+        .readdirSync(backupsDir)
+        .filter((f) => f.startsWith('keep-backup-') && f.endsWith('.db'))
+        .sort();
+      backupCount = files.length;
+      if (files.length > 0) {
+        lastBackupDate = files[files.length - 1]
+          .replace('keep-backup-', '')
+          .replace('.db', '');
+      }
+    }
+  } catch {}
+
+  return {
+    dbSizeBytes,
+    walSizeBytes,
+    backupCount,
+    lastBackupDate,
+    lastMaintenanceTime: global.__keep_last_maintenance_time__ || null,
+  };
 }
 
 function getContext(): DbContext {
@@ -359,6 +473,32 @@ function getContext(): DbContext {
   };
 
   global.__keep_db_ctx__ = ctx;
+
+  // Initialize automated background maintenance (every 6 hours) & rolling daily backups
+  if (!global.__keep_maintenance_timer__) {
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    const timer = setInterval(() => {
+      runMaintenance();
+      checkAndRunDailyBackup();
+    }, SIX_HOURS);
+    timer.unref();
+    global.__keep_maintenance_timer__ = timer;
+
+    // Trigger initial backup check 20 seconds after server start
+    setTimeout(() => {
+      checkAndRunDailyBackup();
+    }, 20000).unref();
+
+    // Hook process exit to flush WAL cleanly
+    const cleanup = () => {
+      try {
+        database.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      } catch {}
+    };
+    process.once('SIGINT', cleanup);
+    process.once('SIGTERM', cleanup);
+  }
+
   return ctx;
 }
 
@@ -657,5 +797,18 @@ export const db = {
       archiveCount: Number(statsQuery.archiveCount),
       totalCount: Number(statsQuery.totalCount),
     };
+  },
+
+  // --- AUTOMATED MAINTENANCE & BACKUPS ---
+  runMaintenance() {
+    return runMaintenance();
+  },
+
+  createBackup() {
+    return createDailyBackup();
+  },
+
+  getDatabaseInfo() {
+    return getDatabaseInfo();
   },
 };
