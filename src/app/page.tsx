@@ -24,7 +24,24 @@ export default async function HomePage() {
   }
 
   const { isDefaultCredentials } = getEnvAdminConfig();
-  const initialItems = db.getAll(user.id, 'all');
+  const rawItems = db.getAll(user.id, 'all');
+  const initialItems = rawItems.map((item) => ({
+    id: String(item.id),
+    user_id: String(item.user_id),
+    url: String(item.url),
+    title: String(item.title),
+    description: item.description ? String(item.description) : null,
+    image_url: item.image_url ? String(item.image_url) : null,
+    favicon_url: item.favicon_url ? String(item.favicon_url) : null,
+    domain: item.domain ? String(item.domain) : null,
+    item_type: item.item_type || 'website',
+    youtube_id: item.youtube_id ? String(item.youtube_id) : null,
+    is_archived: item.is_archived === 1 ? 1 : 0,
+    is_favorite: item.is_favorite === 1 ? 1 : 0,
+    notes: item.notes ? String(item.notes) : null,
+    created_at: Number(item.created_at),
+    updated_at: Number(item.updated_at),
+  }));
   const rev = db.getUserRevision(user.id);
   const initialEtag = `W/"u-${user.id}-r${rev}-all"`;
 

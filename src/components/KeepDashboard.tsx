@@ -285,74 +285,85 @@ export function KeepDashboard({
 
   return (
     <div className="min-h-screen text-zinc-100 flex flex-col selection:bg-indigo-500/20 relative">
-      {/* Locked 3-Column Single-Row Navigation Header */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#08080a]/85 backdrop-blur-xl">
-        <div className="mx-auto grid max-w-7xl grid-cols-[auto_1fr_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2.5 sm:px-6">
-          {/* Left Column: Logo & Active Workspace User */}
-          <div className="flex items-center gap-2.5 select-none">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/20">
-              <Bookmark className="h-4 w-4 fill-white" />
-            </div>
-            <span className="font-semibold tracking-wider text-sm text-zinc-100 hidden xs:inline">
-              KEEP
-            </span>
-            {currentUser && (
-              <span className="hidden md:inline-block rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 text-[11px] font-mono text-zinc-400">
-                {currentUser.username}
+      {/* Navigation Header (Locked 3-Column on Desktop, 2-Row Optimized on Mobile/PWA) */}
+      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#08080a]/90 backdrop-blur-xl">
+        <div className="mx-auto max-w-7xl px-3 py-2 sm:px-6 sm:py-2.5">
+          <div className="flex items-center justify-between gap-3 sm:grid sm:grid-cols-[1fr_auto_1fr]">
+            {/* Left Column: Logo & Active Workspace User */}
+            <div className="flex items-center gap-2 select-none">
+              <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/20">
+                <Bookmark className="h-3.5 w-3.5 sm:h-4 sm:w-4 fill-white" />
+              </div>
+              <span className="font-semibold tracking-wider text-xs sm:text-sm text-zinc-100">
+                KEEP
               </span>
-            )}
+              {currentUser && (
+                <span className="rounded-md border border-white/[0.06] bg-white/[0.03] px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-[11px] font-mono text-zinc-400">
+                  {currentUser.username}
+                </span>
+              )}
+            </div>
+
+            {/* Desktop Center Column: Filter Tabs (Locked in Center) */}
+            <div className="hidden sm:flex justify-center">
+              <FilterTabs
+                activeFilter={filter}
+                onFilterChange={setFilter}
+                stats={stats}
+              />
+            </div>
+
+            {/* Right Column: Actions & Item Count */}
+            <div className="flex items-center justify-end gap-1.5 sm:gap-2">
+              {filter === 'archive' && items.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearArchive}
+                  disabled={clearingArchive}
+                  className="flex items-center gap-1.5 rounded-lg border border-rose-500/25 bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer select-none"
+                  title="Permanently delete all items in Archive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">Delete All</span>
+                </button>
+              )}
+
+              <div className="hidden lg:flex items-center text-xs text-zinc-500 font-mono tabular-nums min-w-[60px] justify-end mr-1">
+                <span>
+                  {items.length} {items.length === 1 ? 'item' : 'items'}
+                </span>
+              </div>
+
+              {currentUser?.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => setIsUsersModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2 sm:px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/[0.08] hover:text-zinc-100 transition-colors cursor-pointer select-none"
+                  title="Manage Users & Workspaces"
+                >
+                  <Users className="h-3.5 w-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">Users</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="rounded-lg border border-white/[0.06] bg-white/[0.03] p-1.5 text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200 transition-colors cursor-pointer"
+                title="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
 
-          {/* Center Column: Filter Tabs (Locked in Center) */}
-          <div className="flex justify-center overflow-x-auto">
+          {/* Mobile Full-Width Filter Tabs Row: Centered, never cut off, Watch Later 100% visible */}
+          <div className="flex sm:hidden mt-2 justify-center overflow-x-auto no-scrollbar">
             <FilterTabs
               activeFilter={filter}
               onFilterChange={setFilter}
               stats={stats}
             />
-          </div>
-
-          {/* Right Column: Actions & Item Count */}
-          <div className="flex items-center justify-end gap-2">
-            {filter === 'archive' && items.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClearArchive}
-                disabled={clearingArchive}
-                className="flex items-center gap-1.5 rounded-lg border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer select-none"
-                title="Permanently delete all items in Archive"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">Delete All</span>
-              </button>
-            )}
-
-            <div className="hidden lg:flex items-center text-xs text-zinc-500 font-mono tabular-nums min-w-[60px] justify-end mr-1">
-              <span>
-                {items.length} {items.length === 1 ? 'item' : 'items'}
-              </span>
-            </div>
-
-            {currentUser?.role === 'admin' && (
-              <button
-                type="button"
-                onClick={() => setIsUsersModalOpen(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/[0.08] hover:text-zinc-100 transition-colors cursor-pointer select-none"
-                title="Manage Users & Workspaces"
-              >
-                <Users className="h-3.5 w-3.5 text-indigo-400" />
-                <span className="hidden sm:inline">Users</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="rounded-lg border border-white/[0.06] bg-white/[0.03] p-1.5 text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Sign out"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
           </div>
         </div>
       </header>

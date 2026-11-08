@@ -165,6 +165,27 @@ function bumpRevision(ctx: DbContext, userId: string): void {
   ctx.userRevisions.set(userId, current + 1);
 }
 
+function toPlainItem(row: unknown): KeepItem {
+  const r = row as KeepItem;
+  return {
+    id: String(r.id),
+    user_id: String(r.user_id),
+    url: String(r.url),
+    title: String(r.title || r.url),
+    description: r.description ? String(r.description) : null,
+    image_url: r.image_url ? String(r.image_url) : null,
+    favicon_url: r.favicon_url ? String(r.favicon_url) : null,
+    domain: r.domain ? String(r.domain) : null,
+    item_type: r.item_type || 'website',
+    youtube_id: r.youtube_id ? String(r.youtube_id) : null,
+    is_archived: Number(r.is_archived) === 1 ? 1 : 0,
+    is_favorite: Number(r.is_favorite) === 1 ? 1 : 0,
+    notes: r.notes ? String(r.notes) : null,
+    created_at: Number(r.created_at),
+    updated_at: Number(r.updated_at),
+  };
+}
+
 export function runMaintenance(): { success: boolean; timeMs: number } {
   const start = Date.now();
   try {
@@ -621,31 +642,38 @@ export const db = {
   // --- PRE-COMPILED WORKSPACE LINK OPERATIONS ---
   getAll(userId: string, filter: FilterCategory = 'inbox'): KeepItem[] {
     const { stmts } = getContext();
+    let rows: unknown[];
     switch (filter) {
       case 'all':
-        return stmts.getLinksAll.all(userId) as unknown as KeepItem[];
+        rows = stmts.getLinksAll.all(userId);
+        break;
       case 'videos':
-        return stmts.getLinksVideos.all(userId) as unknown as KeepItem[];
+        rows = stmts.getLinksVideos.all(userId);
+        break;
       case 'articles':
-        return stmts.getLinksArticles.all(userId) as unknown as KeepItem[];
+        rows = stmts.getLinksArticles.all(userId);
+        break;
       case 'archive':
-        return stmts.getLinksArchive.all(userId) as unknown as KeepItem[];
+        rows = stmts.getLinksArchive.all(userId);
+        break;
       case 'inbox':
       default:
-        return stmts.getLinksInbox.all(userId) as unknown as KeepItem[];
+        rows = stmts.getLinksInbox.all(userId);
+        break;
     }
+    return rows.map(toPlainItem);
   },
 
   getById(userId: string, id: string): KeepItem | null {
     const { stmts } = getContext();
     const result = stmts.getLinkById.get(id, userId);
-    return (result as unknown as KeepItem) || null;
+    return result ? toPlainItem(result) : null;
   },
 
   getByUrl(userId: string, url: string): KeepItem | null {
     const { stmts } = getContext();
     const result = stmts.getLinkByUrl.get(userId, url);
-    return (result as unknown as KeepItem) || null;
+    return result ? toPlainItem(result) : null;
   },
 
   create(input: CreateItemInput): KeepItem {
