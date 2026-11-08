@@ -194,8 +194,8 @@ export function OnboardingModal({
           </div>
 
           {/* Step 3: Workflow note */}
-          <p className="text-xs text-zinc-500 text-center">
-            This guide is saved to your server database — once completed, it will not appear again on any of your devices unless you reinstall the container.
+          <p className="text-xs text-zinc-500 text-center leading-relaxed">
+            Once completed, this setup won&apos;t pop up automatically, but you can click on your username in the top-left corner anytime to view this page and your API key again.
           </p>
         </div>
 
