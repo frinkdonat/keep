@@ -8,10 +8,6 @@
     "storage",
     "scripting"
   ],
-  "host_permissions": [
-    "http://*/*",
-    "https://*/*"
-  ],
   "action": {
     "default_title": "Save to Keep",
     "default_icon": {
