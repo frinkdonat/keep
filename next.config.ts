@@ -7,7 +7,7 @@ const cspHeader = [
   "img-src 'self' https: http: data: blob:",
   "font-src 'self' https: data:",
   "frame-src https://www.youtube.com https://www.youtube-nocookie.com",
-  "connect-src 'self'",
+  "connect-src 'self' https: http:",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   "object-src 'none'",

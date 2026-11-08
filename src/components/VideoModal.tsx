@@ -21,14 +21,24 @@ export function VideoModal({ item, onClose, onToggleArchive }: VideoModalProps) 
 
   if (!item || !item.youtube_id) return null;
 
+  const safeHref = /^https?:\/\//i.test(item.url) ? item.url : '#';
+
+  const handleToggleAndClose = () => {
+    onToggleArchive(item);
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 sm:p-6 animate-in fade-in duration-200">
-      <div 
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 sm:p-6 animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
         className="relative w-full max-w-4xl overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header bar */}
-        <div className="flex items-center justify-between border-b border-zinc-800/80 px-5 py-3.5 bg-zinc-900/50">
+        <div className="flex items-center justify-between border-b border-zinc-800/80 px-4 sm:px-5 py-3.5 bg-zinc-900/50">
           <div className="flex items-center gap-3 min-w-0 pr-4">
             <span className="flex-shrink-0 inline-flex items-center rounded-full bg-rose-500/10 px-2.5 py-0.5 text-xs font-medium text-rose-400 border border-rose-500/20">
               YouTube
@@ -38,10 +48,11 @@ export function VideoModal({ item, onClose, onToggleArchive }: VideoModalProps) 
             </h3>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
-              onClick={() => onToggleArchive(item)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer ${
+              type="button"
+              onClick={handleToggleAndClose}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer select-none ${
                 item.is_archived
                   ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
                   : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'
@@ -50,18 +61,18 @@ export function VideoModal({ item, onClose, onToggleArchive }: VideoModalProps) 
               {item.is_archived ? (
                 <>
                   <RotateCcw className="h-3.5 w-3.5" />
-                  <span>Move to Inbox</span>
+                  <span>Restore</span>
                 </>
               ) : (
                 <>
                   <CheckCircle className="h-3.5 w-3.5" />
-                  <span>Mark Watched</span>
+                  <span>Mark as Done</span>
                 </>
               )}
             </button>
 
             <a
-              href={item.url}
+              href={safeHref}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded-lg bg-zinc-800/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 transition"
@@ -72,6 +83,7 @@ export function VideoModal({ item, onClose, onToggleArchive }: VideoModalProps) 
             </a>
 
             <button
+              type="button"
               onClick={onClose}
               className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition cursor-pointer"
             >

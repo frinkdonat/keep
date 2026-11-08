@@ -122,17 +122,19 @@ export async function POST(req: NextRequest) {
       notes: notes || undefined,
     });
 
-    // 3. Fire-and-forget asynchronous OpenGraph/oEmbed enrichment in background
-    fetchMetadata(normalizedUrl, initialTitle)
-      .then((enriched) => {
-        db.enrichMetadata(user.id, item.id, {
-          title: enriched.title,
-          description: enriched.description,
-          image_url: enriched.image_url,
-          favicon_url: enriched.favicon_url,
-        });
-      })
-      .catch(() => {});
+    // 3. Fire-and-forget asynchronous OpenGraph/oEmbed enrichment on next event-loop tick
+    setImmediate(() => {
+      fetchMetadata(normalizedUrl, initialTitle)
+        .then((enriched) => {
+          db.enrichMetadata(user.id, item.id, {
+            title: enriched.title,
+            description: enriched.description,
+            image_url: enriched.image_url,
+            favicon_url: enriched.favicon_url,
+          });
+        })
+        .catch(() => {});
+    });
 
     return NextResponse.json({ ok: true, item }, { status: 201 });
   } catch (error) {

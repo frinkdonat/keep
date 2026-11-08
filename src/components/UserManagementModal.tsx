@@ -30,6 +30,8 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   const [creating, setCreating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [confirmRegenId, setConfirmRegenId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -52,8 +54,22 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
       setUsername('');
       setPassword('');
       setErrorMsg('');
+      setConfirmRegenId(null);
+      setConfirmDeleteId(null);
     }
   }, [isOpen, loadUsers]);
+
+  useEffect(() => {
+    if (!confirmRegenId) return;
+    const timer = setTimeout(() => setConfirmRegenId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmRegenId]);
+
+  useEffect(() => {
+    if (!confirmDeleteId) return;
+    const timer = setTimeout(() => setConfirmDeleteId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmDeleteId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -96,13 +112,12 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   };
 
   const handleRegenerateKey = async (u: PublicUser) => {
-    if (
-      !confirm(
-        `Generate a new Chrome Extension API Key for "${u.username}"? Their old key will stop working.`
-      )
-    ) {
+    if (confirmRegenId !== u.id) {
+      setConfirmRegenId(u.id);
+      setConfirmDeleteId(null);
       return;
     }
+    setConfirmRegenId(null);
 
     try {
       const res = await fetch(`/api/users/${u.id}`, {
@@ -120,13 +135,12 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   };
 
   const handleDeleteUser = async (u: PublicUser) => {
-    if (
-      !confirm(
-        `Delete user "${u.username}" and permanently remove all ${u.item_count} saved links in their workspace?`
-      )
-    ) {
+    if (confirmDeleteId !== u.id) {
+      setConfirmDeleteId(u.id);
+      setConfirmRegenId(null);
       return;
     }
+    setConfirmDeleteId(null);
 
     setUsers((prev) => prev.filter((item) => item.id !== u.id));
     try {
@@ -306,18 +320,42 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
                             <button
                               type="button"
                               onClick={() => handleRegenerateKey(u)}
-                              className="rounded-lg p-1.5 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200 transition-colors cursor-pointer"
-                              title="Regenerate API Key"
+                              className={`rounded-lg transition-colors cursor-pointer select-none ${
+                                confirmRegenId === u.id
+                                  ? 'bg-amber-500/20 border border-amber-500/35 px-2 py-0.5 text-[11px] font-semibold text-amber-300'
+                                  : 'p-1.5 text-zinc-400 hover:bg-white/[0.06] hover:text-zinc-200'
+                              }`}
+                              title={
+                                confirmRegenId === u.id
+                                  ? 'Click again to regenerate API Key'
+                                  : 'Regenerate API Key'
+                              }
                             >
-                              <RefreshCw className="h-3.5 w-3.5" />
+                              {confirmRegenId === u.id ? (
+                                'Rotate?'
+                              ) : (
+                                <RefreshCw className="h-3.5 w-3.5" />
+                              )}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteUser(u)}
-                              className="rounded-lg p-1.5 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400 transition-colors cursor-pointer"
-                              title="Delete user and workspace"
+                              className={`rounded-lg transition-colors cursor-pointer select-none ${
+                                confirmDeleteId === u.id
+                                  ? 'bg-rose-500/20 border border-rose-500/35 px-2 py-0.5 text-[11px] font-semibold text-rose-300'
+                                  : 'p-1.5 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400'
+                              }`}
+                              title={
+                                confirmDeleteId === u.id
+                                  ? 'Click again to delete user and workspace'
+                                  : 'Delete user and workspace'
+                              }
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              {confirmDeleteId === u.id ? (
+                                'Sure?'
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
                             </button>
                           </>
                         )}

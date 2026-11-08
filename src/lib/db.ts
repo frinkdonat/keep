@@ -255,47 +255,6 @@ export function checkAndRunDailyBackup(): void {
   }
 }
 
-export function getDatabaseInfo() {
-  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
-  const dbPath = path.join(dataDir, 'keep.db');
-  const walPath = path.join(dataDir, 'keep.db-wal');
-  const backupsDir = path.join(dataDir, 'backups');
-
-  let dbSizeBytes = 0;
-  let walSizeBytes = 0;
-  try {
-    if (fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
-  } catch {}
-  try {
-    if (fs.existsSync(walPath)) walSizeBytes = fs.statSync(walPath).size;
-  } catch {}
-
-  let backupCount = 0;
-  let lastBackupDate: string | null = null;
-  try {
-    if (fs.existsSync(backupsDir)) {
-      const files = fs
-        .readdirSync(backupsDir)
-        .filter((f) => f.startsWith('keep-backup-') && f.endsWith('.db'))
-        .sort();
-      backupCount = files.length;
-      if (files.length > 0) {
-        lastBackupDate = files[files.length - 1]
-          .replace('keep-backup-', '')
-          .replace('.db', '');
-      }
-    }
-  } catch {}
-
-  return {
-    dbSizeBytes,
-    walSizeBytes,
-    backupCount,
-    lastBackupDate,
-    lastMaintenanceTime: global.__keep_last_maintenance_time__ || null,
-  };
-}
-
 function getContext(): DbContext {
   if (global.__keep_db_ctx__) {
     return global.__keep_db_ctx__;
@@ -362,6 +321,14 @@ function getContext(): DbContext {
     CREATE INDEX IF NOT EXISTS idx_links_user_archived_created ON links (user_id, is_archived, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_links_user_type_archived ON links (user_id, item_type, is_archived, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_links_user_url ON links (user_id, url);
+  `);
+
+  // Automatically repair any legacy YouTube favicons or broken maxresdefault thumbnails
+  database.exec(`
+    UPDATE links
+    SET favicon_url = 'https://www.google.com/s2/favicons?domain=youtube.com&sz=64',
+        image_url = REPLACE(image_url, '/maxresdefault.jpg', '/hqdefault.jpg')
+    WHERE item_type = 'youtube';
   `);
 
   // Sync primary admin account from environment variables
@@ -825,18 +792,5 @@ export const db = {
       archiveCount: Number(statsQuery.archiveCount),
       totalCount: Number(statsQuery.totalCount),
     };
-  },
-
-  // --- AUTOMATED MAINTENANCE & BACKUPS ---
-  runMaintenance() {
-    return runMaintenance();
-  },
-
-  createBackup() {
-    return createDailyBackup();
-  },
-
-  getDatabaseInfo() {
-    return getDatabaseInfo();
   },
 };

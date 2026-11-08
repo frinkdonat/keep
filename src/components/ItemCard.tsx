@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, memo } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import {
   Play,
   Check,
@@ -21,40 +21,92 @@ interface ItemCardProps {
   onDelete: (item: KeepItem) => void;
 }
 
+function YouTubeBadgeIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`flex-shrink-0 ${className}`}
+      aria-hidden="true"
+    >
+      <rect width="24" height="24" rx="6" fill="#FF0033" />
+      <path d="M10 8.2L16.2 12L10 15.8V8.2Z" fill="#FFFFFF" />
+    </svg>
+  );
+}
+
 export const ItemCard = memo(function ItemCard({
   item,
   onPlayVideo,
   onToggleArchive,
   onDelete,
 }: ItemCardProps) {
+  const isVideo = item.item_type === 'youtube' && Boolean(item.youtube_id);
+  const domainLabel = cleanDomain(item.domain) || 'website';
+  const isYouTubeDomain = isVideo || domainLabel === 'youtube.com' || domainLabel === 'youtu.be';
+  const safeHref = /^https?:\/\//i.test(item.url) ? item.url : '#';
+
+  const defaultVideoThumb = item.youtube_id
+    ? `https://i.ytimg.com/vi/${item.youtube_id}/hqdefault.jpg`
+    : null;
+
   const [copied, setCopied] = useState(false);
-  const [imgSrc, setImgSrc] = useState(item.image_url);
-  const [imgError, setImgError] = useState(!item.image_url);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [imgSrc, setImgSrc] = useState<string | null>(item.image_url || defaultVideoThumb);
+  const [imgError, setImgError] = useState(!(item.image_url || defaultVideoThumb));
   const [faviconError, setFaviconError] = useState(false);
 
-  React.useEffect(() => {
-    setImgSrc(item.image_url);
-    setImgError(!item.image_url);
-  }, [item.image_url]);
+  useEffect(() => {
+    const nextSrc =
+      item.image_url ||
+      (item.youtube_id ? `https://i.ytimg.com/vi/${item.youtube_id}/hqdefault.jpg` : null);
+    setImgSrc(nextSrc);
+    setImgError(!nextSrc);
+  }, [item.image_url, item.youtube_id]);
+
+  useEffect(() => {
+    if (!confirmDelete) return;
+    const timer = setTimeout(() => setConfirmDelete(false), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmDelete]);
 
   const handleImgError = () => {
-    if (item.youtube_id && imgSrc && imgSrc.includes('maxresdefault.jpg')) {
-      // Fallback from 4K maxresdefault to standard YouTube hqdefault thumbnail
+    if (item.youtube_id && imgSrc && !imgSrc.includes('hqdefault.jpg')) {
       setImgSrc(`https://i.ytimg.com/vi/${item.youtube_id}/hqdefault.jpg`);
+      setImgError(false);
+    } else if (item.youtube_id && imgSrc && imgSrc.includes('hqdefault.jpg')) {
+      setImgSrc(`https://i.ytimg.com/vi/${item.youtube_id}/mqdefault.jpg`);
+      setImgError(false);
     } else {
       setImgError(true);
     }
   };
 
-  const isVideo = item.item_type === 'youtube' && Boolean(item.youtube_id);
-  const domainLabel = cleanDomain(item.domain) || 'website';
-  const safeHref = /^https?:\/\//i.test(item.url) ? item.url : '#';
+  const handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    // YouTube returns a 120x90 gray placeholder image when maxresdefault does not exist
+    if (
+      item.youtube_id &&
+      e.currentTarget.naturalWidth === 120 &&
+      imgSrc &&
+      imgSrc.includes('maxresdefault.jpg')
+    ) {
+      setImgSrc(`https://i.ytimg.com/vi/${item.youtube_id}/hqdefault.jpg`);
+    }
+  };
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(item.url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    onDelete(item);
   };
 
   return (
@@ -70,7 +122,7 @@ export const ItemCard = memo(function ItemCard({
               src={imgSrc}
               alt={item.title}
               onError={handleImgError}
-              referrerPolicy="no-referrer"
+              onLoad={handleImgLoad}
               className="h-full w-full object-cover transform-gpu transition-transform duration-300 group-hover/thumb:scale-105"
               decoding="async"
             />
@@ -105,7 +157,6 @@ export const ItemCard = memo(function ItemCard({
               src={imgSrc}
               alt={item.title}
               onError={handleImgError}
-              referrerPolicy="no-referrer"
               className="h-full w-full object-cover transform-gpu transition-transform duration-300 group-hover/thumb:scale-105"
               decoding="async"
             />
@@ -121,12 +172,13 @@ export const ItemCard = memo(function ItemCard({
                 }}
               />
               <div className="relative flex items-center gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 backdrop-blur-md shadow-inner transform-gpu transition-transform duration-300 group-hover/thumb:scale-105">
-                {item.favicon_url && !faviconError ? (
+                {isYouTubeDomain ? (
+                  <YouTubeBadgeIcon className="h-4 w-4" />
+                ) : item.favicon_url && !faviconError ? (
                   <img
                     src={item.favicon_url}
                     alt=""
                     onError={() => setFaviconError(true)}
-                    referrerPolicy="no-referrer"
                     className="h-4 w-4 rounded-sm"
                     decoding="async"
                   />
@@ -148,12 +200,13 @@ export const ItemCard = memo(function ItemCard({
           {/* Domain & Time metadata */}
           <div className="flex items-center justify-between text-xs text-zinc-400 mb-1.5">
             <div className="flex items-center gap-1.5 min-w-0 pr-2">
-              {item.favicon_url && !faviconError ? (
+              {isYouTubeDomain ? (
+                <YouTubeBadgeIcon className="h-3.5 w-3.5" />
+              ) : item.favicon_url && !faviconError ? (
                 <img
                   src={item.favicon_url}
                   alt=""
                   onError={() => setFaviconError(true)}
-                  referrerPolicy="no-referrer"
                   className="h-3.5 w-3.5 flex-shrink-0 rounded-sm"
                   decoding="async"
                 />
@@ -249,14 +302,18 @@ export const ItemCard = memo(function ItemCard({
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
 
-          {/* Delete */}
+          {/* Inline 2-Click Delete (No browser confirm popup) */}
           <button
             type="button"
-            onClick={() => onDelete(item)}
-            className="rounded-lg p-1.5 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400 transition-colors cursor-pointer"
-            title="Delete permanently"
+            onClick={handleDeleteClick}
+            className={`rounded-lg transition-colors cursor-pointer select-none ${
+              confirmDelete
+                ? 'bg-rose-500/20 border border-rose-500/35 px-2 py-0.5 text-[11px] font-semibold text-rose-300 hover:bg-rose-500/30'
+                : 'p-1.5 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400'
+            }`}
+            title={confirmDelete ? 'Click again to permanently delete' : 'Delete permanently'}
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            {confirmDelete ? 'Sure?' : <Trash2 className="h-3.5 w-3.5" />}
           </button>
         </div>
       </div>

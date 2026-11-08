@@ -45,6 +45,7 @@ export function KeepDashboard({
   const [allItems, setAllItems] = useState<KeepItem[]>(initialItems);
   const [filter, setFilter] = useState<FilterCategory>('inbox');
   const [clearingArchive, setClearingArchive] = useState(false);
+  const [confirmClearArchive, setConfirmClearArchive] = useState(false);
 
   // Track latest ETag for 0-byte 304 Not Modified conditional syncs
   const etagRef = useRef<string | null>(initialEtag);
@@ -60,6 +61,12 @@ export function KeepDashboard({
   const [showOnboarding, setShowOnboarding] = useState(authenticated && !setupCompleted);
   const [isDefaultCredentials, setIsDefaultCredentials] = useState(initialIsDefault);
   const [setupApiKey, setSetupApiKey] = useState<string | undefined>(initialApiKey);
+
+  useEffect(() => {
+    if (!confirmClearArchive) return;
+    const timer = setTimeout(() => setConfirmClearArchive(false), 3000);
+    return () => clearTimeout(timer);
+  }, [confirmClearArchive]);
 
   // Conditional ETag sync (transfers 0 bytes when unchanged)
   const loadItems = useCallback(async (force = false) => {
@@ -106,7 +113,23 @@ export function KeepDashboard({
     };
   }, [needsAuth, loadItems]);
 
-  // Handle Mobile PWA Share Target feedback & pending saves
+  // Hybrid Save Auto-Enrichment Poll: if a newly saved item (< 8s old) is still scraping its thumbnail/title in the background,
+  // check ETag at 1.2s and 3s so the card updates automatically on screen!
+  useEffect(() => {
+    if (needsAuth || allItems.length === 0) return;
+    const now = Date.now();
+    const hasRecentItem = allItems.some((i) => now - i.created_at < 8000);
+    if (!hasRecentItem) return;
+
+    const t1 = setTimeout(() => loadItems(false), 1200);
+    const t2 = setTimeout(() => loadItems(false), 3000);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [needsAuth, allItems, loadItems]);
+
+  // Handle Mobile PWA Share Target pending saves
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
@@ -241,11 +264,9 @@ export function KeepDashboard({
     [loadItems]
   );
 
-  // Delete Item (0ms optimistic update, single background DELETE)
+  // Delete Item (0ms optimistic update after ItemCard's inline 2-click confirmation)
   const handleDelete = useCallback(
     async (item: KeepItem) => {
-      if (!confirm(`Delete "${item.title}"?`)) return;
-
       setAllItems((prev) => prev.filter((i) => i.id !== item.id));
       try {
         await fetch(`/api/links/${item.id}`, { method: 'DELETE' });
@@ -256,16 +277,13 @@ export function KeepDashboard({
     [loadItems]
   );
 
-  // Clear All Archive Items
+  // Clear All Archive Items (inline 2-click confirmation)
   const handleClearArchive = useCallback(async () => {
-    if (
-      !confirm(
-        `Are you sure you want to permanently delete all ${stats.archiveCount} archived items? This cannot be undone.`
-      )
-    ) {
+    if (!confirmClearArchive) {
+      setConfirmClearArchive(true);
       return;
     }
-
+    setConfirmClearArchive(false);
     setClearingArchive(true);
     setAllItems((prev) => prev.filter((i) => i.is_archived === 0));
 
@@ -277,7 +295,7 @@ export function KeepDashboard({
     } finally {
       setClearingArchive(false);
     }
-  }, [stats.archiveCount, loadItems]);
+  }, [confirmClearArchive, loadItems]);
 
   if (needsAuth) {
     return <PasscodeLock onSuccess={handleLoginSuccess} />;
@@ -285,11 +303,11 @@ export function KeepDashboard({
 
   return (
     <div className="min-h-screen text-zinc-100 flex flex-col selection:bg-indigo-500/20 relative">
-      {/* Navigation Header (Locked 3-Column on Desktop, 2-Row Optimized on Mobile/PWA) */}
+      {/* Navigation Header (Locked 3-Column on Desktop, 2-Row Full-Width Grid on Mobile) */}
       <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#08080a]/90 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-3 py-2 sm:px-6 sm:py-2.5">
           <div className="flex items-center justify-between gap-3 sm:grid sm:grid-cols-[1fr_auto_1fr]">
-            {/* Left Column: Logo & Active Workspace User */}
+            {/* Left Column: Logo & Clickable Active Workspace User Badge */}
             <div className="flex items-center gap-2 select-none">
               <div className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/20">
                 <Bookmark className="h-3.5 w-3.5 sm:h-4 sm:w-4 fill-white" />
@@ -298,9 +316,14 @@ export function KeepDashboard({
                 KEEP
               </span>
               {currentUser && (
-                <span className="rounded-md border border-white/[0.06] bg-white/[0.03] px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-[11px] font-mono text-zinc-400">
+                <button
+                  type="button"
+                  onClick={() => setShowOnboarding(true)}
+                  className="rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 text-[10px] sm:text-[11px] font-mono text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200 transition-colors cursor-pointer"
+                  title="View API Key & Extension Setup Guide"
+                >
                   {currentUser.username}
-                </span>
+                </button>
               )}
             </div>
 
@@ -320,11 +343,19 @@ export function KeepDashboard({
                   type="button"
                   onClick={handleClearArchive}
                   disabled={clearingArchive}
-                  className="flex items-center gap-1.5 rounded-lg border border-rose-500/25 bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer select-none"
-                  title="Permanently delete all items in Archive"
+                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer select-none ${
+                    confirmClearArchive
+                      ? 'border-rose-500/50 bg-rose-500/25 text-rose-200'
+                      : 'border-rose-500/25 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
+                  }`}
+                  title={
+                    confirmClearArchive
+                      ? 'Click again to permanently delete all archived items'
+                      : 'Permanently delete all items in Archive'
+                  }
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  <span className="hidden md:inline">Delete All</span>
+                  <span>{confirmClearArchive ? 'Sure?' : 'Delete All'}</span>
                 </button>
               )}
 
@@ -357,15 +388,13 @@ export function KeepDashboard({
             </div>
           </div>
 
-          {/* Mobile Filter Tabs Row: Safe start alignment so the leftmost Watch Later icon is never clipped */}
-          <div className="flex sm:hidden mt-2 w-full overflow-x-auto no-scrollbar justify-start px-2 py-0.5">
-            <div className="mx-auto flex-shrink-0">
-              <FilterTabs
-                activeFilter={filter}
-                onFilterChange={setFilter}
-                stats={stats}
-              />
-            </div>
+          {/* Mobile 4-Column Full-Width Tabs Row: Fits 100% of screen width with zero horizontal scrolling or clipping */}
+          <div className="flex sm:hidden mt-2 w-full">
+            <FilterTabs
+              activeFilter={filter}
+              onFilterChange={setFilter}
+              stats={stats}
+            />
           </div>
         </div>
       </header>
@@ -429,7 +458,7 @@ export function KeepDashboard({
         )}
       </main>
 
-      {/* Toast Notification (e.g. for Mobile Share Target & Actions) */}
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-[#0d1512]/95 px-4 py-2 text-xs font-medium text-emerald-300 shadow-2xl shadow-black/80 backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-200">
           <CheckCircle2 className="h-4 w-4 text-emerald-400" />
@@ -448,7 +477,7 @@ export function KeepDashboard({
         />
       </div>
 
-      {/* First-Time Server-Side Onboarding Modal */}
+      {/* First-Time Server-Side Onboarding & API Key Guide Modal */}
       {showOnboarding && (
         <OnboardingModal
           isDefaultCredentials={isDefaultCredentials}
