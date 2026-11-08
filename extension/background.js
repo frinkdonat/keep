@@ -131,6 +131,15 @@ chrome.action.onClicked.addListener(async (tab) => {
       }, 2800);
     } else {
       let errorMsg = 'Failed to save to Keep';
+      try {
+        const errData = await res.json();
+        if (errData && errData.error) {
+          errorMsg = `Keep: ${errData.error} (${res.status})`;
+        }
+      } catch {
+        errorMsg = `Keep error: HTTP ${res.status}`;
+      }
+
       if (res.status === 401) {
         errorMsg = 'Keep: Invalid API Key. Check extension settings.';
       }
