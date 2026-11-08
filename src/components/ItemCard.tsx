@@ -13,6 +13,7 @@ import { formatRelativeTime, cleanDomain } from '@/lib/utils';
 
 interface ItemCardProps {
   item: KeepItem;
+  isDismissing?: boolean;
   onToggleArchive: (item: KeepItem) => void;
   onDelete: (item: KeepItem) => void;
 }
@@ -32,6 +33,7 @@ function YouTubeBadgeIcon({ className = 'h-3.5 w-3.5' }: { className?: string })
 
 export const ItemCard = memo(function ItemCard({
   item,
+  isDismissing = false,
   onToggleArchive,
   onDelete,
 }: ItemCardProps) {
@@ -95,7 +97,11 @@ export const ItemCard = memo(function ItemCard({
   };
 
   return (
-    <div className="group relative flex h-[284px] flex-col justify-between overflow-hidden rounded-2xl border border-white/[0.07] bg-[#101015] transition-all duration-150 hover:-translate-y-0.5 hover:border-white/[0.15] hover:bg-[#13131a] hover:shadow-xl hover:shadow-black/50">
+    <div
+      className={`group relative flex h-[284px] flex-col justify-between overflow-hidden rounded-2xl border border-white/[0.07] bg-[#101015] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-white/[0.15] hover:bg-[#13131a] hover:shadow-xl hover:shadow-black/50 ${
+        isDismissing ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'
+      }`}
+    >
       {/* Whole-Card Tap/Click Target (Direct Native Opening) */}
       <a
         href={safeHref}

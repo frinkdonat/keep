@@ -43,6 +43,7 @@ export function KeepDashboard({
   const [filter, setFilter] = useState<FilterCategory>('inbox');
   const [clearingArchive, setClearingArchive] = useState(false);
   const [confirmClearArchive, setConfirmClearArchive] = useState(false);
+  const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
 
   const etagRef = useRef<string | null>(initialEtag);
   const [isUsersModalOpen, setIsUsersModalOpen] = useState(false);
@@ -153,34 +154,53 @@ export function KeepDashboard({
 
   const handleToggleArchive = useCallback(
     async (item: KeepItem) => {
-      const nextArchived = item.is_archived === 1 ? 0 : 1;
-      setAllItems((prev) =>
-        prev.map((i) =>
-          i.id === item.id ? { ...i, is_archived: nextArchived } : i
-        )
-      );
+      setDismissingIds((prev) => new Set(prev).add(item.id));
 
-      try {
-        await fetch(`/api/links/${item.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ is_archived: nextArchived }),
+      setTimeout(async () => {
+        const nextArchived = item.is_archived === 1 ? 0 : 1;
+        setAllItems((prev) =>
+          prev.map((i) =>
+            i.id === item.id ? { ...i, is_archived: nextArchived } : i
+          )
+        );
+        setDismissingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
         });
-      } catch {
-        loadItems(true);
-      }
+
+        try {
+          await fetch(`/api/links/${item.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_archived: nextArchived }),
+          });
+        } catch {
+          loadItems(true);
+        }
+      }, 180);
     },
     [loadItems]
   );
 
   const handleDelete = useCallback(
     async (item: KeepItem) => {
-      setAllItems((prev) => prev.filter((i) => i.id !== item.id));
-      try {
-        await fetch(`/api/links/${item.id}`, { method: 'DELETE' });
-      } catch {
-        loadItems(true);
-      }
+      setDismissingIds((prev) => new Set(prev).add(item.id));
+
+      setTimeout(async () => {
+        setAllItems((prev) => prev.filter((i) => i.id !== item.id));
+        setDismissingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+
+        try {
+          await fetch(`/api/links/${item.id}`, { method: 'DELETE' });
+        } catch {
+          loadItems(true);
+        }
+      }, 180);
     },
     [loadItems]
   );
@@ -307,6 +327,7 @@ export function KeepDashboard({
               <ItemCard
                 key={item.id}
                 item={item}
+                isDismissing={dismissingIds.has(item.id)}
                 onToggleArchive={handleToggleArchive}
                 onDelete={handleDelete}
               />
