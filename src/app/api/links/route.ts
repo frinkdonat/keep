@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { isAuthorized } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/auth';
 import { fetchMetadata } from '@/lib/metadata';
 import { FilterCategory } from '@/lib/types';
 
@@ -16,21 +16,23 @@ export async function OPTIONS() {
 }
 
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
   const filter = (searchParams.get('filter') || 'inbox') as FilterCategory;
 
-  const items = db.getAll(filter);
-  const stats = db.getStats();
+  const items = db.getAll(user.id, filter);
+  const stats = db.getStats(user.id);
 
   return NextResponse.json({ items, stats });
 }
 
 export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -49,11 +51,10 @@ export async function POST(req: NextRequest) {
       url = 'https://' + url;
     }
 
-    // Check if item already exists
-    const existing = db.getByUrl(url);
+    // Check if item already exists in this user's workspace
+    const existing = db.getByUrl(user.id, url);
     if (existing) {
-      // Re-activate if archived
-      const updated = db.update(existing.id, {
+      const updated = db.update(user.id, existing.id, {
         is_archived: 0,
         notes: notes || existing.notes || undefined,
       });
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
     const meta = await fetchMetadata(url, initialTitle);
 
     const item = db.create({
+      user_id: user.id,
       url: meta.url,
       title: meta.title,
       description: meta.description || undefined,
@@ -83,13 +85,14 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { searchParams } = new URL(req.url);
   if (searchParams.get('scope') === 'archive') {
-    const deletedCount = db.clearArchive();
+    const deletedCount = db.clearArchive(user.id);
     return NextResponse.json({ ok: true, count: deletedCount });
   }
 

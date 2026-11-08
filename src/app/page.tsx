@@ -10,13 +10,19 @@ import {
   FileText,
   Trash2,
   LogOut,
+  Users,
 } from 'lucide-react';
 import { KeepItem, FilterCategory, ItemStats } from '@/lib/types';
 import { FilterTabs } from '@/components/FilterTabs';
 import { ItemCard } from '@/components/ItemCard';
 import { VideoModal } from '@/components/VideoModal';
-import { PasscodeLock, LoginSuccessPayload } from '@/components/PasscodeLock';
+import {
+  PasscodeLock,
+  LoginSuccessPayload,
+  AuthenticatedUserInfo,
+} from '@/components/PasscodeLock';
 import { OnboardingModal } from '@/components/OnboardingModal';
+import { UserManagementModal } from '@/components/UserManagementModal';
 
 export default function HomePage() {
   const [items, setItems] = useState<KeepItem[]>([]);
@@ -34,10 +40,12 @@ export default function HomePage() {
 
   // Modals
   const [selectedVideo, setSelectedVideo] = useState<KeepItem | null>(null);
+  const [isUsersModalOpen, setIsUsersModalOpen] = useState(false);
 
   // Auth & First-Time Setup State
   const [authChecked, setAuthChecked] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUserInfo | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [isDefaultCredentials, setIsDefaultCredentials] = useState(false);
   const [setupApiKey, setSetupApiKey] = useState<string | undefined>(undefined);
@@ -50,8 +58,10 @@ export default function HomePage() {
         const data = await res.json();
         if (data.required && !data.authenticated) {
           setNeedsAuth(true);
+          setCurrentUser(null);
         } else {
           setNeedsAuth(false);
+          setCurrentUser(data.user || null);
           setShowOnboarding(!data.setupCompleted);
           setIsDefaultCredentials(Boolean(data.isDefaultCredentials));
           setSetupApiKey(data.apiKey);
@@ -78,6 +88,7 @@ export default function HomePage() {
       const res = await fetch(`/api/links?${params.toString()}`);
       if (res.status === 401) {
         setNeedsAuth(true);
+        setCurrentUser(null);
         return;
       }
       if (res.ok) {
@@ -102,6 +113,7 @@ export default function HomePage() {
 
   const handleLoginSuccess = (payload: LoginSuccessPayload) => {
     setNeedsAuth(false);
+    setCurrentUser(payload.user);
     setShowOnboarding(!payload.setupCompleted);
     setIsDefaultCredentials(payload.isDefaultCredentials);
     setSetupApiKey(payload.apiKey);
@@ -115,6 +127,7 @@ export default function HomePage() {
       // ignore
     }
     setNeedsAuth(true);
+    setCurrentUser(null);
     setItems([]);
   };
 
@@ -210,7 +223,7 @@ export default function HomePage() {
       {/* Locked 3-Column Single-Row Navigation Header */}
       <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#08080a]/85 backdrop-blur-xl">
         <div className="mx-auto grid max-w-7xl grid-cols-[auto_1fr_auto] sm:grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2.5 sm:px-6">
-          {/* Left Column: Logo */}
+          {/* Left Column: Logo & Active Workspace User */}
           <div className="flex items-center gap-2.5 select-none">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/20">
               <Bookmark className="h-4 w-4 fill-white" />
@@ -218,6 +231,11 @@ export default function HomePage() {
             <span className="font-semibold tracking-wider text-sm text-zinc-100 hidden xs:inline">
               KEEP
             </span>
+            {currentUser && (
+              <span className="hidden md:inline-block rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 text-[11px] font-mono text-zinc-400">
+                {currentUser.username}
+              </span>
+            )}
           </div>
 
           {/* Center Column: Filter Tabs (Locked in Center) */}
@@ -230,7 +248,7 @@ export default function HomePage() {
           </div>
 
           {/* Right Column: Actions & Item Count */}
-          <div className="flex items-center justify-end gap-2.5">
+          <div className="flex items-center justify-end gap-2">
             {filter === 'archive' && items.length > 0 && (
               <button
                 type="button"
@@ -244,11 +262,23 @@ export default function HomePage() {
               </button>
             )}
 
-            <div className="hidden md:flex items-center text-xs text-zinc-500 font-mono tabular-nums min-w-[60px] justify-end">
+            <div className="hidden lg:flex items-center text-xs text-zinc-500 font-mono tabular-nums min-w-[60px] justify-end mr-1">
               <span>
                 {items.length} {items.length === 1 ? 'item' : 'items'}
               </span>
             </div>
+
+            {currentUser?.role === 'admin' && (
+              <button
+                type="button"
+                onClick={() => setIsUsersModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/[0.08] hover:text-zinc-100 transition-colors cursor-pointer select-none"
+                title="Manage Users & Workspaces"
+              >
+                <Users className="h-3.5 w-3.5 text-indigo-400" />
+                <span className="hidden sm:inline">Users</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -340,8 +370,16 @@ export default function HomePage() {
       {showOnboarding && (
         <OnboardingModal
           isDefaultCredentials={isDefaultCredentials}
-          apiKey={setupApiKey}
+          apiKey={setupApiKey || currentUser?.apiKey}
           onComplete={() => setShowOnboarding(false)}
+        />
+      )}
+
+      {/* Admin User Management Modal */}
+      {currentUser?.role === 'admin' && (
+        <UserManagementModal
+          isOpen={isUsersModalOpen}
+          onClose={() => setIsUsersModalOpen(false)}
         />
       )}
 

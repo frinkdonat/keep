@@ -1,7 +1,30 @@
 export type ItemType = 'youtube' | 'website';
 
+export type UserRole = 'admin' | 'user';
+
+export interface UserRecord {
+  id: string;
+  username: string;
+  password_hash: string;
+  api_key: string;
+  role: UserRole;
+  setup_completed: number; // 0 or 1
+  created_at: number;
+}
+
+export interface PublicUser {
+  id: string;
+  username: string;
+  api_key: string;
+  role: UserRole;
+  setup_completed: boolean;
+  item_count: number;
+  created_at: number;
+}
+
 export interface KeepItem {
   id: string;
+  user_id: string;
   url: string;
   title: string;
   description: string | null;
@@ -20,6 +43,7 @@ export interface KeepItem {
 export type FilterCategory = 'inbox' | 'videos' | 'articles' | 'archive' | 'all';
 
 export interface CreateItemInput {
+  user_id: string;
   url: string;
   title?: string;
   description?: string;

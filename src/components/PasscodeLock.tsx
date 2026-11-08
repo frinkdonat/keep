@@ -2,8 +2,17 @@
 
 import React, { useState } from 'react';
 import { Bookmark, ArrowRight, ShieldAlert, User, Lock } from 'lucide-react';
+import { UserRole } from '@/lib/types';
+
+export interface AuthenticatedUserInfo {
+  id: string;
+  username: string;
+  role: UserRole;
+  apiKey: string;
+}
 
 export interface LoginSuccessPayload {
+  user: AuthenticatedUserInfo;
   setupCompleted: boolean;
   isDefaultCredentials: boolean;
   apiKey?: string;
@@ -37,6 +46,7 @@ export function PasscodeLock({ onSuccess }: PasscodeLockProps) {
 
       if (res.ok && data.ok) {
         onSuccess({
+          user: data.user,
           setupCompleted: Boolean(data.setupCompleted),
           isDefaultCredentials: Boolean(data.isDefaultCredentials),
           apiKey: data.apiKey,
@@ -66,7 +76,7 @@ export function PasscodeLock({ onSuccess }: PasscodeLockProps) {
 
         <div className="text-center mb-7">
           <h1 className="text-lg font-semibold tracking-tight text-zinc-100">Sign in to Keep</h1>
-          <p className="text-xs text-zinc-400 mt-1">Enter your instance credentials to continue</p>
+          <p className="text-xs text-zinc-400 mt-1">Enter your workspace credentials to continue</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAuthorized } from '@/lib/auth';
+import { getAuthenticatedUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  db.markSetupCompleted();
+  db.markUserSetupCompleted(user.id);
   return NextResponse.json({ ok: true, setupCompleted: true });
 }

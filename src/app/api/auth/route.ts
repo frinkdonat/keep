@@ -1,36 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getAuthConfig,
-  safeCompare,
+  getEnvAdminConfig,
   createSessionToken,
-  verifySessionToken,
+  getAuthenticatedUser,
   getClientIp,
   checkRateLimit,
   recordFailedAttempt,
   clearFailedAttempts,
 } from '@/lib/auth';
-import { db } from '@/lib/db';
+import { db, verifyPassword, hashPassword } from '@/lib/db';
+
+const DUMMY_HASH = hashPassword('dummy_timing_protection_password');
 
 export async function GET(req: NextRequest) {
-  const sessionCookie = req.cookies.get('keep_session');
-  const authenticated = verifySessionToken(sessionCookie?.value);
+  const user = getAuthenticatedUser(req);
 
-  if (!authenticated) {
+  if (!user) {
     return NextResponse.json({
       required: true,
       authenticated: false,
     });
   }
 
-  const { isDefaultCredentials, apiKey } = getAuthConfig();
-  const setupCompleted = db.isSetupCompleted();
+  const { isDefaultCredentials } = getEnvAdminConfig();
 
   return NextResponse.json({
     required: true,
     authenticated: true,
-    setupCompleted,
-    isDefaultCredentials,
-    apiKey: setupCompleted ? undefined : apiKey,
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      apiKey: user.api_key,
+    },
+    setupCompleted: user.setup_completed === 1,
+    isDefaultCredentials: user.role === 'admin' ? isDefaultCredentials : false,
+    apiKey: user.api_key,
   });
 }
 
@@ -54,21 +59,29 @@ export async function POST(req: NextRequest) {
     const inputUser = String(body.username || '').trim();
     const inputPass = String(body.password || '');
 
-    const { username, password, isDefaultCredentials, apiKey } = getAuthConfig();
+    const user = inputUser ? db.getUserByUsername(inputUser) : null;
 
-    const userMatch = safeCompare(inputUser, username);
-    const passMatch = safeCompare(inputPass, password);
+    // Constant-time password verification even if username does not exist (prevents user enumeration)
+    const passValid = user
+      ? verifyPassword(inputPass, user.password_hash)
+      : verifyPassword(inputPass, DUMMY_HASH) && false;
 
-    if (userMatch && passMatch) {
+    if (user && passValid) {
       clearFailedAttempts(ip);
-      const token = createSessionToken();
-      const setupCompleted = db.isSetupCompleted();
+      const token = createSessionToken(user);
+      const { isDefaultCredentials } = getEnvAdminConfig();
 
       const response = NextResponse.json({
         ok: true,
-        setupCompleted,
-        isDefaultCredentials,
-        apiKey: setupCompleted ? undefined : apiKey,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          apiKey: user.api_key,
+        },
+        setupCompleted: user.setup_completed === 1,
+        isDefaultCredentials: user.role === 'admin' ? isDefaultCredentials : false,
+        apiKey: user.api_key,
       });
 
       response.cookies.set('keep_session', token, {

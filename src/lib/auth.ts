@@ -1,51 +1,9 @@
 import { NextRequest } from 'next/server';
 import crypto from 'node:crypto';
-import os from 'node:os';
+import { db, getEnvAdminConfig } from './db';
+import { UserRecord } from './types';
 
-export const DUMMY_DEFAULTS = {
-  USERNAME: 'admin',
-  PASSWORD: 'changeme',
-  API_KEY: 'keep_secret_api_key',
-};
-
-export function getAuthConfig() {
-  let rawUser =
-    process.env.KEEP_USERNAME ||
-    process.env.APP_USERNAME ||
-    process.env.USERNAME ||
-    DUMMY_DEFAULTS.USERNAME;
-
-  // On Windows, OS sets process.env.USERNAME to the Windows login name before .env loads
-  if (
-    process.platform === 'win32' &&
-    !process.env.KEEP_USERNAME &&
-    !process.env.APP_USERNAME &&
-    rawUser === os.userInfo().username
-  ) {
-    rawUser = DUMMY_DEFAULTS.USERNAME;
-  }
-
-  const username = rawUser.trim();
-
-  const password = (
-    process.env.KEEP_PASSWORD ||
-    process.env.APP_PASSWORD ||
-    process.env.PASSWORD ||
-    DUMMY_DEFAULTS.PASSWORD
-  ).trim();
-
-  const apiKey = (
-    process.env.API_KEY ||
-    DUMMY_DEFAULTS.API_KEY
-  ).trim();
-
-  const isDefaultCredentials =
-    username === DUMMY_DEFAULTS.USERNAME ||
-    password === DUMMY_DEFAULTS.PASSWORD ||
-    apiKey === DUMMY_DEFAULTS.API_KEY;
-
-  return { username, password, apiKey, isDefaultCredentials };
-}
+export { getEnvAdminConfig };
 
 /**
  * Constant-time string comparison immune to length and timing side-channel attacks
@@ -58,21 +16,68 @@ export function safeCompare(a: string, b: string): boolean {
 }
 
 /**
- * Generates a deterministic HMAC-SHA256 session token bound to current credentials.
- * If USERNAME or PASSWORD is changed in Docker env vars, existing sessions immediately expire.
+ * Generates an HMAC-SHA256 signed session cookie token bound to a specific user's credentials.
+ * Format: `${user.id}.${hmac}`
+ * Changing a user's password or deleting the user immediately invalidates their session.
  */
-export function createSessionToken(): string {
-  const { username, password, apiKey } = getAuthConfig();
-  return crypto
-    .createHmac('sha256', `keep_hmac_key:${password}:${apiKey}`)
-    .update(`session_v1:${username}`)
+export function createSessionToken(user: UserRecord): string {
+  const sig = crypto
+    .createHmac('sha256', `keep_user_hmac:${user.password_hash}:${user.api_key}`)
+    .update(`session_v2:${user.id}:${user.username}`)
     .digest('hex');
+  return `${user.id}.${sig}`;
 }
 
-export function verifySessionToken(token: string | undefined): boolean {
-  if (!token) return false;
-  const expected = createSessionToken();
-  return safeCompare(token, expected);
+export function verifySessionCookie(cookieValue: string | undefined): UserRecord | null {
+  if (!cookieValue) return null;
+  const dotIdx = cookieValue.indexOf('.');
+  if (dotIdx <= 0) return null;
+
+  const userId = cookieValue.slice(0, dotIdx);
+  const sig = cookieValue.slice(dotIdx + 1);
+
+  const user = db.getUserById(userId);
+  if (!user) return null;
+
+  const expected = createSessionToken(user);
+  const expectedSig = expected.slice(dotIdx + 1);
+
+  if (safeCompare(sig, expectedSig)) {
+    return user;
+  }
+  return null;
+}
+
+/**
+ * Resolves the authenticated UserRecord from either API Key header (Chrome Extension)
+ * or signed HttpOnly session cookie (Web UI).
+ */
+export function getAuthenticatedUser(req: NextRequest): UserRecord | null {
+  // 1. Check API Key header (Chrome Extension or API client)
+  const authHeader = req.headers.get('authorization');
+  const xApiKey = req.headers.get('x-api-key');
+
+  let token = '';
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (xApiKey) {
+    token = xApiKey.trim();
+  }
+
+  if (token) {
+    const user = db.getUserByApiKey(token);
+    if (user && safeCompare(token, user.api_key)) {
+      return user;
+    }
+  }
+
+  // 2. Check signed web session cookie
+  const sessionCookie = req.cookies.get('keep_session');
+  return verifySessionCookie(sessionCookie?.value);
+}
+
+export function isAuthorized(req: NextRequest): boolean {
+  return getAuthenticatedUser(req) !== null;
 }
 
 // Brute-force protection (in-memory rate limiter per IP)
@@ -122,31 +127,4 @@ export function recordFailedAttempt(ip: string): void {
 
 export function clearFailedAttempts(ip: string): void {
   loginAttempts.delete(ip);
-}
-
-export function isAuthorized(req: NextRequest): boolean {
-  const { apiKey } = getAuthConfig();
-
-  // 1. Check API Key header (Chrome Extension or API client)
-  const authHeader = req.headers.get('authorization');
-  const xApiKey = req.headers.get('x-api-key');
-
-  let token = '';
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else if (xApiKey) {
-    token = xApiKey.trim();
-  }
-
-  if (apiKey && token && safeCompare(token, apiKey)) {
-    return true;
-  }
-
-  // 2. Check signed web session cookie
-  const sessionCookie = req.cookies.get('keep_session');
-  if (sessionCookie && verifySessionToken(sessionCookie.value)) {
-    return true;
-  }
-
-  return false;
 }
