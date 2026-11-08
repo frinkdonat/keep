@@ -12,6 +12,28 @@ export interface ExtractedMetadata {
   youtube_id: string | null;
 }
 
+// In-memory LRU cache for scraped URLs (zero network cost for repeated URLs)
+const META_CACHE_LIMIT = 500;
+const metadataCache = new Map<string, ExtractedMetadata>();
+
+function getCachedMeta(url: string): ExtractedMetadata | undefined {
+  const hit = metadataCache.get(url);
+  if (hit) {
+    // Refresh LRU order
+    metadataCache.delete(url);
+    metadataCache.set(url, hit);
+  }
+  return hit;
+}
+
+function setCachedMeta(url: string, meta: ExtractedMetadata): void {
+  if (metadataCache.size >= META_CACHE_LIMIT) {
+    const oldestKey = metadataCache.keys().next().value;
+    if (oldestKey) metadataCache.delete(oldestKey);
+  }
+  metadataCache.set(url, meta);
+}
+
 // Security: Disallow internal/private networks to prevent SSRF
 function isPrivateHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
@@ -19,7 +41,7 @@ function isPrivateHost(hostname: string): boolean {
   if (/^10\./.test(lower)) return true;
   if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(lower)) return true;
   if (/^192\.168\./.test(lower)) return true;
-  if (/^169\.254\./.test(lower)) return true; // Link-local / Cloud metadata endpoint
+  if (/^169\.254\./.test(lower)) return true;
   return false;
 }
 
@@ -51,59 +73,32 @@ export function extractYouTubeId(url: string): string | null {
   return null;
 }
 
-export async function fetchMetadata(targetUrl: string, initialTitle?: string): Promise<ExtractedMetadata> {
-  let parsedUrl: URL;
+/**
+ * Synchronous, zero-I/O metadata extraction (< 0.05ms) for instant item creation
+ */
+export function extractFastMetadata(
+  targetUrl: string,
+  initialTitle?: string
+): ExtractedMetadata {
+  const cached = getCachedMeta(targetUrl);
+  if (cached) return cached;
+
+  let domain = targetUrl;
   try {
-    parsedUrl = new URL(targetUrl);
-    // Protocol whitelist
-    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-      throw new Error('Unsupported protocol');
-    }
+    const parsed = new URL(targetUrl);
+    domain = parsed.hostname.replace(/^www\./, '');
   } catch {
-    return {
-      url: targetUrl,
-      title: initialTitle || targetUrl,
-      description: null,
-      image_url: null,
-      favicon_url: null,
-      domain: targetUrl,
-      item_type: 'website',
-      youtube_id: null,
-    };
+    // fallback
   }
 
-  const domain = parsedUrl.hostname.replace(/^www\./, '');
-  const defaultFavicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
-
-  // 1. YouTube specialized metadata
   const youtubeId = extractYouTubeId(targetUrl);
   if (youtubeId) {
-    let title = initialTitle || 'YouTube Video';
-    let authorName = '';
-
-    try {
-      const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}&format=json`;
-      const res = await fetch(oembedUrl, {
-        signal: AbortSignal.timeout(3000),
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Keep/1.0)' },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.title) title = data.title;
-        if (data.author_name) authorName = data.author_name;
-      }
-    } catch {
-      // fallback gracefully
-    }
-
-    const description = authorName ? `By ${authorName} on YouTube` : 'YouTube Video';
-    const image_url = `https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`;
-
+    const cleanTitle = (initialTitle || 'YouTube Video').replace(/\s*-\s*YouTube$/i, '').trim();
     return {
       url: targetUrl,
-      title: title.replace(/ - YouTube$/, ''),
-      description,
-      image_url,
+      title: cleanTitle || 'YouTube Video',
+      description: 'YouTube Video',
+      image_url: `https://i.ytimg.com/vi/${youtubeId}/maxresdefault.jpg`,
       favicon_url: 'https://www.youtube.com/s/desktop/f1725b30/img/favicon_144x144.png',
       domain: 'youtube.com',
       item_type: 'youtube',
@@ -111,54 +106,110 @@ export async function fetchMetadata(targetUrl: string, initialTitle?: string): P
     };
   }
 
-  // Security: Check for private network SSRF attempts
-  if (isPrivateHost(parsedUrl.hostname)) {
-    return {
-      url: targetUrl,
-      title: initialTitle || domain,
-      description: null,
-      image_url: null,
-      favicon_url: defaultFavicon,
-      domain,
-      item_type: 'website',
-      youtube_id: null,
-    };
+  return {
+    url: targetUrl,
+    title: initialTitle || domain,
+    description: null,
+    image_url: null,
+    favicon_url: `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+    domain,
+    item_type: 'website',
+    youtube_id: null,
+  };
+}
+
+export async function fetchMetadata(
+  targetUrl: string,
+  initialTitle?: string
+): Promise<ExtractedMetadata> {
+  const cached = getCachedMeta(targetUrl);
+  if (cached) return cached;
+
+  const fast = extractFastMetadata(targetUrl, initialTitle);
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(targetUrl);
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return fast;
+    }
+  } catch {
+    return fast;
   }
 
-  // 2. Standard website metadata scraping
-  let title = initialTitle || domain;
+  // 1. YouTube oEmbed enrichment
+  if (fast.youtube_id) {
+    let title = fast.title;
+    let authorName = '';
+
+    try {
+      const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${fast.youtube_id}&format=json`;
+      const res = await fetch(oembedUrl, {
+        signal: AbortSignal.timeout(2500),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Keep/1.0)' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.title) title = String(data.title).replace(/\s*-\s*YouTube$/i, '');
+        if (data.author_name) authorName = String(data.author_name);
+      }
+    } catch {
+      // keep fast fallback
+    }
+
+    const enriched: ExtractedMetadata = {
+      ...fast,
+      title,
+      description: authorName ? `By ${authorName} on YouTube` : 'YouTube Video',
+    };
+    setCachedMeta(targetUrl, enriched);
+    return enriched;
+  }
+
+  // Security: SSRF check
+  if (isPrivateHost(parsedUrl.hostname)) {
+    return fast;
+  }
+
+  // 2. High-speed HTML <head> streaming scraper (stops immediately at </head>)
+  let title = fast.title;
   let description: string | null = null;
   let image_url: string | null = null;
-  let favicon_url = defaultFavicon;
+  let favicon_url = fast.favicon_url;
 
   try {
     const res = await fetch(targetUrl, {
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(3000),
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
       },
     });
 
     if (res.ok && res.body) {
-      // Memory safety: Read at most 512KB of HTML
       const reader = res.body.getReader();
-      const chunks: Uint8Array[] = [];
+      const decoder = new TextDecoder('utf-8', { fatal: false });
+      let htmlHead = '';
       let totalBytes = 0;
-      const MAX_BYTES = 512 * 1024; // 512 KB
+      const MAX_BYTES = 196 * 1024; // 196KB max for <head>
 
       while (totalBytes < MAX_BYTES) {
         const { done, value } = await reader.read();
         if (done || !value) break;
-        chunks.push(value);
         totalBytes += value.length;
+        htmlHead += decoder.decode(value, { stream: true });
+        // Early exit as soon as </head> is reached — skips downloading and parsing <body>!
+        const headEndIdx = htmlHead.toLowerCase().indexOf('</head>');
+        if (headEndIdx !== -1) {
+          htmlHead = htmlHead.slice(0, headEndIdx + 7);
+          break;
+        }
       }
       reader.cancel().catch(() => {});
 
-      const decoder = new TextDecoder('utf-8', { fatal: false });
-      const html = decoder.decode(Buffer.concat(chunks));
-      const $ = cheerio.load(html);
+      const $ = cheerio.load(htmlHead);
 
       // Title
       const ogTitle = $('meta[property="og:title"]').attr('content');
@@ -189,12 +240,14 @@ export async function fetchMetadata(targetUrl: string, initialTitle?: string): P
             image_url = resolved;
           }
         } catch {
-          // ignore invalid image URL
+          // ignore
         }
       }
 
       // Favicon
-      const iconHref = $('link[rel~="icon"]').attr('href') || $('link[rel~="apple-touch-icon"]').attr('href');
+      const iconHref =
+        $('link[rel~="icon"]').attr('href') ||
+        $('link[rel~="apple-touch-icon"]').attr('href');
       if (iconHref) {
         try {
           const resolvedIcon = new URL(iconHref, targetUrl).href;
@@ -202,22 +255,21 @@ export async function fetchMetadata(targetUrl: string, initialTitle?: string): P
             favicon_url = resolvedIcon;
           }
         } catch {
-          // fallback to defaultFavicon
+          // keep default
         }
       }
     }
   } catch {
-    // Graceful fallback on network timeout or blocked bots
+    // Graceful fallback
   }
 
-  return {
-    url: targetUrl,
+  const result: ExtractedMetadata = {
+    ...fast,
     title,
     description,
     image_url,
     favicon_url,
-    domain,
-    item_type: 'website',
-    youtube_id: null,
   };
+  setCachedMeta(targetUrl, result);
+  return result;
 }

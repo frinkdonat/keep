@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthenticatedUser } from '@/lib/auth';
-import { fetchMetadata } from '@/lib/metadata';
+import { extractFastMetadata, fetchMetadata } from '@/lib/metadata';
 import { FilterCategory } from '@/lib/types';
 
 export async function OPTIONS() {
@@ -22,12 +22,19 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const filter = (searchParams.get('filter') || 'inbox') as FilterCategory;
+  const filter = (searchParams.get('filter') || 'all') as FilterCategory;
 
   const items = db.getAll(user.id, filter);
   const stats = db.getStats(user.id);
 
-  return NextResponse.json({ items, stats });
+  return NextResponse.json(
+    { items, stats },
+    {
+      headers: {
+        'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+      },
+    }
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -46,7 +53,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 });
     }
 
-    // Prepend https:// if missing
     if (!/^https?:\/\//i.test(url)) {
       url = 'https://' + url;
     }
@@ -61,21 +67,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, item: updated, reactivated: true });
     }
 
-    // Fetch rich metadata (YouTube or OpenGraph website)
-    const meta = await fetchMetadata(url, initialTitle);
+    // 1. Synchronous zero-latency metadata extraction (< 0.05ms)
+    const fastMeta = extractFastMetadata(url, initialTitle);
 
+    // 2. Immediate SQLite insert (< 0.5ms)
     const item = db.create({
       user_id: user.id,
-      url: meta.url,
-      title: meta.title,
-      description: meta.description || undefined,
-      image_url: meta.image_url || undefined,
-      favicon_url: meta.favicon_url || undefined,
-      domain: meta.domain,
-      item_type: meta.item_type,
-      youtube_id: meta.youtube_id || undefined,
+      url: fastMeta.url,
+      title: fastMeta.title,
+      description: fastMeta.description || undefined,
+      image_url: fastMeta.image_url || undefined,
+      favicon_url: fastMeta.favicon_url || undefined,
+      domain: fastMeta.domain,
+      item_type: fastMeta.item_type,
+      youtube_id: fastMeta.youtube_id || undefined,
       notes: notes || undefined,
     });
+
+    // 3. Fire-and-forget asynchronous OpenGraph/oEmbed enrichment in background
+    fetchMetadata(url, initialTitle)
+      .then((enriched) => {
+        db.enrichMetadata(user.id, item.id, {
+          title: enriched.title,
+          description: enriched.description,
+          image_url: enriched.image_url,
+          favicon_url: enriched.favicon_url,
+        });
+      })
+      .catch(() => {});
 
     return NextResponse.json({ ok: true, item }, { status: 201 });
   } catch (error) {

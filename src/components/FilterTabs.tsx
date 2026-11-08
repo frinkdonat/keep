@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { memo } from 'react';
 import { Inbox, Video, Newspaper, Archive } from 'lucide-react';
 import { FilterCategory, ItemStats } from '@/lib/types';
 
@@ -10,7 +10,11 @@ interface FilterTabsProps {
   stats: ItemStats;
 }
 
-export function FilterTabs({ activeFilter, onFilterChange, stats }: FilterTabsProps) {
+export const FilterTabs = memo(function FilterTabs({
+  activeFilter,
+  onFilterChange,
+  stats,
+}: FilterTabsProps) {
   const tabs = [
     {
       id: 'inbox' as FilterCategory,
@@ -71,4 +75,4 @@ export function FilterTabs({ activeFilter, onFilterChange, stats }: FilterTabsPr
       })}
     </div>
   );
-}
+});

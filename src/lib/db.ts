@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -72,15 +72,64 @@ export function generateApiKey(): string {
   return 'keep_sec_' + crypto.randomBytes(24).toString('hex');
 }
 
-// Global declaration for singleton across hot reloads in development
-declare global {
-  // eslint-disable-next-line no-var
-  var __keep_db__: DatabaseSync | undefined;
+interface PreparedStatements {
+  getAllUsersWithCounts: StatementSync;
+  insertUser: StatementSync;
+  updateUserPassword: StatementSync;
+  updateUserApiKey: StatementSync;
+  deleteUserById: StatementSync;
+  deleteUserLinks: StatementSync;
+  markSetupDone: StatementSync;
+  countUserLinks: StatementSync;
+
+  getLinksAll: StatementSync;
+  getLinksInbox: StatementSync;
+  getLinksVideos: StatementSync;
+  getLinksArticles: StatementSync;
+  getLinksArchive: StatementSync;
+  getLinkById: StatementSync;
+  getLinkByUrl: StatementSync;
+  insertLink: StatementSync;
+  enrichLinkMeta: StatementSync;
+  deleteLinkById: StatementSync;
+  clearUserArchive: StatementSync;
+  getUserStats: StatementSync;
 }
 
-function getDatabase(): DatabaseSync {
-  if (global.__keep_db__) {
-    return global.__keep_db__;
+interface DbContext {
+  database: DatabaseSync;
+  stmts: PreparedStatements;
+  usersById: Map<string, UserRecord>;
+  usersByUsername: Map<string, UserRecord>;
+  usersByApiKey: Map<string, UserRecord>;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __keep_db_ctx__: DbContext | undefined;
+}
+
+function rebuildUserCache(
+  database: DatabaseSync,
+  usersById: Map<string, UserRecord>,
+  usersByUsername: Map<string, UserRecord>,
+  usersByApiKey: Map<string, UserRecord>
+) {
+  usersById.clear();
+  usersByUsername.clear();
+  usersByApiKey.clear();
+
+  const rows = database.prepare('SELECT * FROM users').all() as unknown as UserRecord[];
+  for (const u of rows) {
+    usersById.set(u.id, u);
+    usersByUsername.set(u.username.toLowerCase(), u);
+    usersByApiKey.set(u.api_key, u);
+  }
+}
+
+function getContext(): DbContext {
+  if (global.__keep_db_ctx__) {
+    return global.__keep_db_ctx__;
   }
 
   const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -91,14 +140,14 @@ function getDatabase(): DatabaseSync {
   const dbPath = path.join(dataDir, 'keep.db');
   const database = new DatabaseSync(dbPath);
 
-  // Performance optimizations: WAL mode, memory cache & mmap
+  // Maximum SQLite performance tuning
   database.exec('PRAGMA journal_mode = WAL;');
   database.exec('PRAGMA synchronous = NORMAL;');
-  database.exec('PRAGMA cache_size = -16000;');
+  database.exec('PRAGMA cache_size = -32000;'); // 32MB page cache
   database.exec('PRAGMA temp_store = MEMORY;');
-  database.exec('PRAGMA mmap_size = 67108864;');
+  database.exec('PRAGMA mmap_size = 134217728;'); // 128MB memory-mapped I/O
+  database.exec('PRAGMA busy_timeout = 5000;');
 
-  // Create tables
   database.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -134,21 +183,19 @@ function getDatabase(): DatabaseSync {
     );
   `);
 
-  // Safe migration: ensure user_id column exists on existing links table
   const columns = database.prepare('PRAGMA table_info(links)').all() as Array<{ name: string }>;
-  const hasUserId = columns.some((c) => c.name === 'user_id');
-  if (!hasUserId) {
+  if (!columns.some((c) => c.name === 'user_id')) {
     database.exec("ALTER TABLE links ADD COLUMN user_id TEXT NOT NULL DEFAULT 'admin';");
   }
 
-  // Create composite indexes for per-user workspace isolation
   database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_links_user_created ON links (user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_links_user_archived_created ON links (user_id, is_archived, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_links_user_type_archived ON links (user_id, item_type, is_archived, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_links_user_url ON links (user_id, url);
   `);
 
-  // Ensure primary admin user is synced with Docker environment variables
+  // Sync primary admin account from environment variables
   const envAdmin = getEnvAdminConfig();
   const existingAdmin = database
     .prepare("SELECT * FROM users WHERE id = 'admin'")
@@ -173,7 +220,6 @@ function getDatabase(): DatabaseSync {
         Date.now()
       );
   } else {
-    // Sync if Docker env vars changed
     const usernameChanged = existingAdmin.username !== envAdmin.username;
     const apiKeyChanged = existingAdmin.api_key !== envAdmin.apiKey;
     const passwordChanged = !verifyPassword(envAdmin.password, existingAdmin.password_hash);
@@ -191,45 +237,107 @@ function getDatabase(): DatabaseSync {
     }
   }
 
-  global.__keep_db__ = database;
-  return database;
+  // Pre-compile all hot-path SQL statements once
+  const stmts: PreparedStatements = {
+    getAllUsersWithCounts: database.prepare(`
+      SELECT 
+        u.id, u.username, u.api_key, u.role, u.setup_completed, u.created_at,
+        COUNT(l.id) as item_count
+      FROM users u
+      LEFT JOIN links l ON l.user_id = u.id
+      GROUP BY u.id
+      ORDER BY CASE WHEN u.role = 'admin' THEN 0 ELSE 1 END, u.created_at ASC
+    `),
+    insertUser: database.prepare(`
+      INSERT INTO users (id, username, password_hash, api_key, role, setup_completed, created_at)
+      VALUES (?, ?, ?, ?, 'user', 0, ?)
+    `),
+    updateUserPassword: database.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
+    updateUserApiKey: database.prepare('UPDATE users SET api_key = ? WHERE id = ?'),
+    deleteUserById: database.prepare('DELETE FROM users WHERE id = ?'),
+    deleteUserLinks: database.prepare('DELETE FROM links WHERE user_id = ?'),
+    markSetupDone: database.prepare('UPDATE users SET setup_completed = 1 WHERE id = ?'),
+    countUserLinks: database.prepare('SELECT COUNT(*) as c FROM links WHERE user_id = ?'),
+
+    getLinksAll: database.prepare(
+      'SELECT * FROM links WHERE user_id = ? ORDER BY created_at DESC'
+    ),
+    getLinksInbox: database.prepare(
+      'SELECT * FROM links WHERE user_id = ? AND is_archived = 0 ORDER BY created_at DESC'
+    ),
+    getLinksVideos: database.prepare(
+      "SELECT * FROM links WHERE user_id = ? AND item_type = 'youtube' AND is_archived = 0 ORDER BY created_at DESC"
+    ),
+    getLinksArticles: database.prepare(
+      "SELECT * FROM links WHERE user_id = ? AND item_type = 'website' AND is_archived = 0 ORDER BY created_at DESC"
+    ),
+    getLinksArchive: database.prepare(
+      'SELECT * FROM links WHERE user_id = ? AND is_archived = 1 ORDER BY created_at DESC'
+    ),
+    getLinkById: database.prepare('SELECT * FROM links WHERE id = ? AND user_id = ?'),
+    getLinkByUrl: database.prepare('SELECT * FROM links WHERE user_id = ? AND url = ?'),
+    insertLink: database.prepare(`
+      INSERT INTO links (
+        id, user_id, url, title, description, image_url, favicon_url, domain,
+        item_type, youtube_id, is_archived, is_favorite, notes,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+    `),
+    enrichLinkMeta: database.prepare(`
+      UPDATE links
+      SET title = ?, description = ?, image_url = ?, favicon_url = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `),
+    deleteLinkById: database.prepare('DELETE FROM links WHERE id = ? AND user_id = ?'),
+    clearUserArchive: database.prepare(
+      'DELETE FROM links WHERE user_id = ? AND is_archived = 1'
+    ),
+    getUserStats: database.prepare(`
+      SELECT
+        COUNT(CASE WHEN is_archived = 0 THEN 1 END) as inboxCount,
+        COUNT(CASE WHEN item_type = 'youtube' AND is_archived = 0 THEN 1 END) as videosCount,
+        COUNT(CASE WHEN item_type = 'website' AND is_archived = 0 THEN 1 END) as articlesCount,
+        COUNT(CASE WHEN is_archived = 1 THEN 1 END) as archiveCount,
+        COUNT(*) as totalCount
+      FROM links
+      WHERE user_id = ?
+    `),
+  };
+
+  const usersById = new Map<string, UserRecord>();
+  const usersByUsername = new Map<string, UserRecord>();
+  const usersByApiKey = new Map<string, UserRecord>();
+  rebuildUserCache(database, usersById, usersByUsername, usersByApiKey);
+
+  const ctx: DbContext = {
+    database,
+    stmts,
+    usersById,
+    usersByUsername,
+    usersByApiKey,
+  };
+
+  global.__keep_db_ctx__ = ctx;
+  return ctx;
 }
 
 export const db = {
-  // --- USER MANAGEMENT ---
+  // --- O(1) IN-MEMORY USER LOOKUPS ---
   getUserById(id: string): UserRecord | null {
-    const database = getDatabase();
-    const row = database.prepare('SELECT * FROM users WHERE id = ?').get(id);
-    return (row as unknown as UserRecord) || null;
+    return getContext().usersById.get(id) || null;
   },
 
   getUserByUsername(username: string): UserRecord | null {
-    const database = getDatabase();
-    const row = database
-      .prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE')
-      .get(username.trim());
-    return (row as unknown as UserRecord) || null;
+    return getContext().usersByUsername.get(username.trim().toLowerCase()) || null;
   },
 
   getUserByApiKey(apiKey: string): UserRecord | null {
-    const database = getDatabase();
-    const row = database.prepare('SELECT * FROM users WHERE api_key = ?').get(apiKey.trim());
-    return (row as unknown as UserRecord) || null;
+    return getContext().usersByApiKey.get(apiKey.trim()) || null;
   },
 
   getAllUsers(): PublicUser[] {
-    const database = getDatabase();
-    const rows = database
-      .prepare(
-        `SELECT 
-          u.id, u.username, u.api_key, u.role, u.setup_completed, u.created_at,
-          COUNT(l.id) as item_count
-         FROM users u
-         LEFT JOIN links l ON l.user_id = u.id
-         GROUP BY u.id
-         ORDER BY CASE WHEN u.role = 'admin' THEN 0 ELSE 1 END, u.created_at ASC`
-      )
-      .all() as Array<{
+    const { stmts } = getContext();
+    const rows = stmts.getAllUsersWithCounts.all() as Array<{
       id: string;
       username: string;
       api_key: string;
@@ -251,10 +359,9 @@ export const db = {
   },
 
   createUser(username: string, password: string): PublicUser {
-    const database = getDatabase();
+    const ctx = getContext();
     const cleanUsername = username.trim();
-    const existing = this.getUserByUsername(cleanUsername);
-    if (existing) {
+    if (ctx.usersByUsername.has(cleanUsername.toLowerCase())) {
       throw new Error('Username already exists');
     }
 
@@ -263,12 +370,8 @@ export const db = {
     const passHash = hashPassword(password);
     const now = Date.now();
 
-    database
-      .prepare(
-        `INSERT INTO users (id, username, password_hash, api_key, role, setup_completed, created_at)
-         VALUES (?, ?, ?, ?, 'user', 0, ?)`
-      )
-      .run(id, cleanUsername, passHash, apiKey, now);
+    ctx.stmts.insertUser.run(id, cleanUsername, passHash, apiKey, now);
+    rebuildUserCache(ctx.database, ctx.usersById, ctx.usersByUsername, ctx.usersByApiKey);
 
     return {
       id,
@@ -285,26 +388,20 @@ export const db = {
     id: string,
     updates: { password?: string; regenerateApiKey?: boolean }
   ): PublicUser | null {
-    const database = getDatabase();
-    const user = this.getUserById(id);
-    if (!user) return null;
+    const ctx = getContext();
+    if (!ctx.usersById.has(id)) return null;
 
     if (updates.password) {
-      database
-        .prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-        .run(hashPassword(updates.password), id);
+      ctx.stmts.updateUserPassword.run(hashPassword(updates.password), id);
     }
 
     if (updates.regenerateApiKey) {
-      database
-        .prepare('UPDATE users SET api_key = ? WHERE id = ?')
-        .run(generateApiKey(), id);
+      ctx.stmts.updateUserApiKey.run(generateApiKey(), id);
     }
 
-    const updated = this.getUserById(id)!;
-    const countRow = database
-      .prepare('SELECT COUNT(*) as c FROM links WHERE user_id = ?')
-      .get(id) as { c: number | bigint };
+    rebuildUserCache(ctx.database, ctx.usersById, ctx.usersByUsername, ctx.usersByApiKey);
+    const updated = ctx.usersById.get(id)!;
+    const countRow = ctx.stmts.countUserLinks.get(id) as { c: number | bigint };
 
     return {
       id: updated.id,
@@ -318,99 +415,119 @@ export const db = {
   },
 
   deleteUser(id: string): boolean {
-    if (id === 'admin') return false; // Cannot delete the primary admin account
-    const database = getDatabase();
-    database.prepare('DELETE FROM links WHERE user_id = ?').run(id);
-    const result = database.prepare('DELETE FROM users WHERE id = ?').run(id);
+    if (id === 'admin') return false;
+    const ctx = getContext();
+    ctx.stmts.deleteUserLinks.run(id);
+    const result = ctx.stmts.deleteUserById.run(id);
+    rebuildUserCache(ctx.database, ctx.usersById, ctx.usersByUsername, ctx.usersByApiKey);
     return Number(result.changes) > 0;
   },
 
   markUserSetupCompleted(userId: string): void {
-    const database = getDatabase();
-    database.prepare('UPDATE users SET setup_completed = 1 WHERE id = ?').run(userId);
+    const ctx = getContext();
+    ctx.stmts.markSetupDone.run(userId);
+    const u = ctx.usersById.get(userId);
+    if (u) {
+      u.setup_completed = 1;
+    }
   },
 
-  // --- WORKSPACE-ISOLATED LINKS ---
+  // --- PRE-COMPILED WORKSPACE LINK OPERATIONS ---
   getAll(userId: string, filter: FilterCategory = 'inbox'): KeepItem[] {
-    const database = getDatabase();
-    let sql =
-      'SELECT * FROM links WHERE user_id = ? AND is_archived = 0 ORDER BY created_at DESC';
-
+    const { stmts } = getContext();
     switch (filter) {
-      case 'videos':
-        sql =
-          "SELECT * FROM links WHERE user_id = ? AND item_type = 'youtube' AND is_archived = 0 ORDER BY created_at DESC";
-        break;
-      case 'articles':
-        sql =
-          "SELECT * FROM links WHERE user_id = ? AND item_type = 'website' AND is_archived = 0 ORDER BY created_at DESC";
-        break;
-      case 'archive':
-        sql =
-          'SELECT * FROM links WHERE user_id = ? AND is_archived = 1 ORDER BY created_at DESC';
-        break;
       case 'all':
-        sql = 'SELECT * FROM links WHERE user_id = ? ORDER BY created_at DESC';
-        break;
+        return stmts.getLinksAll.all(userId) as unknown as KeepItem[];
+      case 'videos':
+        return stmts.getLinksVideos.all(userId) as unknown as KeepItem[];
+      case 'articles':
+        return stmts.getLinksArticles.all(userId) as unknown as KeepItem[];
+      case 'archive':
+        return stmts.getLinksArchive.all(userId) as unknown as KeepItem[];
       case 'inbox':
       default:
-        sql =
-          'SELECT * FROM links WHERE user_id = ? AND is_archived = 0 ORDER BY created_at DESC';
-        break;
+        return stmts.getLinksInbox.all(userId) as unknown as KeepItem[];
     }
-
-    const stmt = database.prepare(sql);
-    return stmt.all(userId) as unknown as KeepItem[];
   },
 
   getById(userId: string, id: string): KeepItem | null {
-    const database = getDatabase();
-    const stmt = database.prepare('SELECT * FROM links WHERE id = ? AND user_id = ?');
-    const result = stmt.get(id, userId);
+    const { stmts } = getContext();
+    const result = stmts.getLinkById.get(id, userId);
     return (result as unknown as KeepItem) || null;
   },
 
   getByUrl(userId: string, url: string): KeepItem | null {
-    const database = getDatabase();
-    const stmt = database.prepare('SELECT * FROM links WHERE user_id = ? AND url = ?');
-    const result = stmt.get(userId, url);
+    const { stmts } = getContext();
+    const result = stmts.getLinkByUrl.get(userId, url);
     return (result as unknown as KeepItem) || null;
   },
 
   create(input: CreateItemInput): KeepItem {
-    const database = getDatabase();
+    const { stmts } = getContext();
     const id = crypto.randomUUID();
     const now = Date.now();
 
-    const stmt = database.prepare(`
-      INSERT INTO links (
-        id, user_id, url, title, description, image_url, favicon_url, domain,
-        item_type, youtube_id, is_archived, is_favorite, notes,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
-    `);
-
-    stmt.run(
+    const item: KeepItem = {
       id,
-      input.user_id,
-      input.url,
-      input.title || input.url,
-      input.description || null,
-      input.image_url || null,
-      input.favicon_url || null,
-      input.domain || null,
-      input.item_type || 'website',
-      input.youtube_id || null,
-      input.notes || null,
-      now,
-      now
+      user_id: input.user_id,
+      url: input.url,
+      title: input.title || input.url,
+      description: input.description || null,
+      image_url: input.image_url || null,
+      favicon_url: input.favicon_url || null,
+      domain: input.domain || null,
+      item_type: input.item_type || 'website',
+      youtube_id: input.youtube_id || null,
+      is_archived: 0,
+      is_favorite: 0,
+      notes: input.notes || null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    stmts.insertLink.run(
+      item.id,
+      item.user_id,
+      item.url,
+      item.title,
+      item.description,
+      item.image_url,
+      item.favicon_url,
+      item.domain,
+      item.item_type,
+      item.youtube_id,
+      item.notes,
+      item.created_at,
+      item.updated_at
     );
 
-    return this.getById(input.user_id, id)!;
+    return item;
+  },
+
+  enrichMetadata(
+    userId: string,
+    id: string,
+    meta: {
+      title: string;
+      description: string | null;
+      image_url: string | null;
+      favicon_url: string | null;
+    }
+  ): void {
+    const { stmts } = getContext();
+    stmts.enrichLinkMeta.run(
+      meta.title,
+      meta.description,
+      meta.image_url,
+      meta.favicon_url,
+      Date.now(),
+      id,
+      userId
+    );
   },
 
   update(userId: string, id: string, input: UpdateItemInput): KeepItem | null {
-    const database = getDatabase();
+    const { database } = getContext();
     const existing = this.getById(userId, id);
     if (!existing) return null;
 
@@ -442,35 +559,20 @@ export const db = {
   },
 
   delete(userId: string, id: string): boolean {
-    const database = getDatabase();
-    const stmt = database.prepare('DELETE FROM links WHERE id = ? AND user_id = ?');
-    const result = stmt.run(id, userId);
+    const { stmts } = getContext();
+    const result = stmts.deleteLinkById.run(id, userId);
     return Number(result.changes) > 0;
   },
 
   clearArchive(userId: string): number {
-    const database = getDatabase();
-    const stmt = database.prepare(
-      'DELETE FROM links WHERE user_id = ? AND is_archived = 1'
-    );
-    const result = stmt.run(userId);
-    return Number(result.changes);
+    const { stmts } = getContext();
+    const result = stmts.clearUserArchive.run(userId);
+    return Number(result.changes) > 0 ? Number(result.changes) : 0;
   },
 
   getStats(userId: string): ItemStats {
-    const database = getDatabase();
-    const statsQuery = database
-      .prepare(
-        `SELECT
-          COUNT(CASE WHEN is_archived = 0 THEN 1 END) as inboxCount,
-          COUNT(CASE WHEN item_type = 'youtube' AND is_archived = 0 THEN 1 END) as videosCount,
-          COUNT(CASE WHEN item_type = 'website' AND is_archived = 0 THEN 1 END) as articlesCount,
-          COUNT(CASE WHEN is_archived = 1 THEN 1 END) as archiveCount,
-          COUNT(*) as totalCount
-        FROM links
-        WHERE user_id = ?`
-      )
-      .get(userId) as {
+    const { stmts } = getContext();
+    const statsQuery = stmts.getUserStats.get(userId) as {
       inboxCount: number | bigint;
       videosCount: number | bigint;
       articlesCount: number | bigint;

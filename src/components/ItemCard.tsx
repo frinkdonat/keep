@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import {
   Play,
   Check,
@@ -21,7 +21,7 @@ interface ItemCardProps {
   onDelete: (item: KeepItem) => void;
 }
 
-export function ItemCard({
+export const ItemCard = memo(function ItemCard({
   item,
   onPlayVideo,
   onToggleArchive,
@@ -42,7 +42,7 @@ export function ItemCard({
   };
 
   return (
-    <div className="group relative flex h-[324px] flex-col justify-between overflow-hidden rounded-2xl border border-white/[0.07] bg-[#101015]/85 backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.15] hover:bg-[#13131a] hover:shadow-2xl hover:shadow-black/60">
+    <div className="group relative flex h-[324px] flex-col justify-between overflow-hidden rounded-2xl border border-white/[0.07] bg-[#101015]/85 backdrop-blur-sm transform-gpu transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.15] hover:bg-[#13131a] hover:shadow-2xl hover:shadow-black/60 [content-visibility:auto] [contain-intrinsic-size:0_324px]">
       {/* Uniform 16:9 Top Media Header for ALL Cards */}
       {isVideo ? (
         <div
@@ -54,8 +54,9 @@ export function ItemCard({
               src={item.image_url}
               alt={item.title}
               onError={() => setImgError(true)}
-              className="h-full w-full object-cover transition-transform duration-300 group-hover/thumb:scale-105"
+              className="h-full w-full object-cover transform-gpu transition-transform duration-300 group-hover/thumb:scale-105"
               loading="lazy"
+              decoding="async"
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-rose-950/30 via-zinc-950 to-zinc-950">
@@ -65,7 +66,7 @@ export function ItemCard({
 
           {/* Play Button Overlay */}
           <div className="absolute inset-0 flex items-center justify-center bg-black/25 transition-colors duration-200 group-hover/thumb:bg-black/45">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-rose-600/95 text-white shadow-lg shadow-black/60 backdrop-blur-sm transition-transform duration-200 group-hover/thumb:scale-110">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-rose-600/95 text-white shadow-lg shadow-black/60 backdrop-blur-sm transform-gpu transition-transform duration-200 group-hover/thumb:scale-110">
               <Play className="h-4 w-4 fill-current ml-0.5" />
             </div>
           </div>
@@ -88,8 +89,9 @@ export function ItemCard({
               src={item.image_url}
               alt={item.title}
               onError={() => setImgError(true)}
-              className="h-full w-full object-cover transition-transform duration-300 group-hover/thumb:scale-105"
+              className="h-full w-full object-cover transform-gpu transition-transform duration-300 group-hover/thumb:scale-105"
               loading="lazy"
+              decoding="async"
             />
           ) : (
             /* Sleek Fallback Cover for Websites without an OpenGraph Image */
@@ -102,13 +104,14 @@ export function ItemCard({
                   backgroundSize: '16px 16px',
                 }}
               />
-              <div className="relative flex items-center gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 backdrop-blur-md shadow-inner transition-transform duration-300 group-hover/thumb:scale-105">
+              <div className="relative flex items-center gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 backdrop-blur-md shadow-inner transform-gpu transition-transform duration-300 group-hover/thumb:scale-105">
                 {item.favicon_url && !faviconError ? (
                   <img
                     src={item.favicon_url}
                     alt=""
                     onError={() => setFaviconError(true)}
                     className="h-4 w-4 rounded-sm"
+                    decoding="async"
                   />
                 ) : (
                   <Globe className="h-4 w-4 text-indigo-400" />
@@ -134,6 +137,7 @@ export function ItemCard({
                   alt=""
                   onError={() => setFaviconError(true)}
                   className="h-3.5 w-3.5 flex-shrink-0 rounded-sm"
+                  decoding="async"
                 />
               ) : (
                 <Globe className="h-3.5 w-3.5 text-zinc-500 flex-shrink-0" />
@@ -240,4 +244,4 @@ export function ItemCard({
       </div>
     </div>
   );
-}
+});

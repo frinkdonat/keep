@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Bookmark,
   Loader2,
@@ -25,15 +25,7 @@ import { OnboardingModal } from '@/components/OnboardingModal';
 import { UserManagementModal } from '@/components/UserManagementModal';
 
 export default function HomePage() {
-  const [items, setItems] = useState<KeepItem[]>([]);
-  const [stats, setStats] = useState<ItemStats>({
-    inboxCount: 0,
-    videosCount: 0,
-    articlesCount: 0,
-    favoritesCount: 0,
-    archiveCount: 0,
-    totalCount: 0,
-  });
+  const [allItems, setAllItems] = useState<KeepItem[]>([]);
   const [filter, setFilter] = useState<FilterCategory>('inbox');
   const [loading, setLoading] = useState(true);
   const [clearingArchive, setClearingArchive] = useState(false);
@@ -78,14 +70,10 @@ export default function HomePage() {
     checkAuth();
   }, [checkAuth]);
 
-  // Load items
-  const loadItems = useCallback(async (currentFilter: FilterCategory) => {
+  // Load all workspace items once for 0ms client-side tab switching
+  const loadItems = useCallback(async () => {
     try {
-      const params = new URLSearchParams({
-        filter: currentFilter,
-      });
-
-      const res = await fetch(`/api/links?${params.toString()}`);
+      const res = await fetch('/api/links?filter=all');
       if (res.status === 401) {
         setNeedsAuth(true);
         setCurrentUser(null);
@@ -93,10 +81,7 @@ export default function HomePage() {
       }
       if (res.ok) {
         const data = await res.json();
-        setItems(data.items || []);
-        if (data.stats) {
-          setStats(data.stats);
-        }
+        setAllItems(data.items || []);
       }
     } catch (err) {
       console.error('Failed to load links:', err);
@@ -107,20 +92,91 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!needsAuth && authChecked) {
-      loadItems(filter);
+      loadItems();
     }
-  }, [filter, needsAuth, authChecked, loadItems]);
+  }, [needsAuth, authChecked, loadItems]);
 
-  const handleLoginSuccess = (payload: LoginSuccessPayload) => {
-    setNeedsAuth(false);
-    setCurrentUser(payload.user);
-    setShowOnboarding(!payload.setupCompleted);
-    setIsDefaultCredentials(payload.isDefaultCredentials);
-    setSetupApiKey(payload.apiKey);
-    loadItems(filter);
-  };
+  // Auto-refresh when switching back to the Keep browser tab (syncs new extension saves automatically)
+  useEffect(() => {
+    if (needsAuth || !authChecked) return;
+    const onVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        loadItems();
+      }
+    };
+    window.addEventListener('focus', onVisibilityOrFocus);
+    document.addEventListener('visibilitychange', onVisibilityOrFocus);
+    return () => {
+      window.removeEventListener('focus', onVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+    };
+  }, [needsAuth, authChecked, loadItems]);
 
-  const handleSignOut = async () => {
+  // Instant 0ms in-memory stats calculation
+  const stats = useMemo<ItemStats>(() => {
+    let inboxCount = 0;
+    let videosCount = 0;
+    let articlesCount = 0;
+    let archiveCount = 0;
+
+    for (let i = 0; i < allItems.length; i++) {
+      const item = allItems[i];
+      if (item.is_archived === 1) {
+        archiveCount++;
+      } else {
+        inboxCount++;
+        if (item.item_type === 'youtube') {
+          videosCount++;
+        } else {
+          articlesCount++;
+        }
+      }
+    }
+
+    return {
+      inboxCount,
+      videosCount,
+      articlesCount,
+      favoritesCount: 0,
+      archiveCount,
+      totalCount: allItems.length,
+    };
+  }, [allItems]);
+
+  // Instant 0ms in-memory tab filtering
+  const items = useMemo<KeepItem[]>(() => {
+    switch (filter) {
+      case 'videos':
+        return allItems.filter(
+          (i) => i.is_archived === 0 && i.item_type === 'youtube'
+        );
+      case 'articles':
+        return allItems.filter(
+          (i) => i.is_archived === 0 && i.item_type === 'website'
+        );
+      case 'archive':
+        return allItems.filter((i) => i.is_archived === 1);
+      case 'all':
+        return allItems;
+      case 'inbox':
+      default:
+        return allItems.filter((i) => i.is_archived === 0);
+    }
+  }, [allItems, filter]);
+
+  const handleLoginSuccess = useCallback(
+    (payload: LoginSuccessPayload) => {
+      setNeedsAuth(false);
+      setCurrentUser(payload.user);
+      setShowOnboarding(!payload.setupCompleted);
+      setIsDefaultCredentials(payload.isDefaultCredentials);
+      setSetupApiKey(payload.apiKey);
+      loadItems();
+    },
+    [loadItems]
+  );
+
+  const handleSignOut = useCallback(async () => {
     try {
       await fetch('/api/auth', { method: 'DELETE' });
     } catch {
@@ -128,83 +184,75 @@ export default function HomePage() {
     }
     setNeedsAuth(true);
     setCurrentUser(null);
-    setItems([]);
-  };
+    setAllItems([]);
+  }, []);
 
-  // Toggle Archive (Mark watched / Inbox)
-  const handleToggleArchive = async (item: KeepItem) => {
-    const nextArchived = item.is_archived === 1 ? 0 : 1;
-    setItems((prev) =>
-      filter === 'all'
-        ? prev.map((i) => (i.id === item.id ? { ...i, is_archived: nextArchived } : i))
-        : prev.filter((i) => i.id !== item.id)
-    );
-
-    setStats((prev) => ({
-      ...prev,
-      inboxCount: nextArchived
-        ? Math.max(0, prev.inboxCount - 1)
-        : prev.inboxCount + 1,
-      archiveCount: nextArchived
-        ? prev.archiveCount + 1
-        : Math.max(0, prev.archiveCount - 1),
-    }));
-
-    if (selectedVideo?.id === item.id) {
-      setSelectedVideo((prev) =>
-        prev ? { ...prev, is_archived: nextArchived } : null
+  // Toggle Archive (0ms optimistic update, single background PATCH)
+  const handleToggleArchive = useCallback(
+    async (item: KeepItem) => {
+      const nextArchived = item.is_archived === 1 ? 0 : 1;
+      setAllItems((prev) =>
+        prev.map((i) =>
+          i.id === item.id ? { ...i, is_archived: nextArchived } : i
+        )
       );
-    }
 
-    try {
-      await fetch(`/api/links/${item.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_archived: nextArchived }),
-      });
-      loadItems(filter);
-    } catch {
-      loadItems(filter);
-    }
-  };
+      setSelectedVideo((prev) =>
+        prev && prev.id === item.id
+          ? { ...prev, is_archived: nextArchived }
+          : prev
+      );
 
-  // Delete Item
-  const handleDelete = async (item: KeepItem) => {
-    if (!confirm(`Delete "${item.title}"?`)) return;
+      try {
+        await fetch(`/api/links/${item.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_archived: nextArchived }),
+        });
+      } catch {
+        loadItems();
+      }
+    },
+    [loadItems]
+  );
 
-    setItems((prev) => prev.filter((i) => i.id !== item.id));
-    try {
-      await fetch(`/api/links/${item.id}`, { method: 'DELETE' });
-      loadItems(filter);
-    } catch {
-      loadItems(filter);
-    }
-  };
+  // Delete Item (0ms optimistic update, single background DELETE)
+  const handleDelete = useCallback(
+    async (item: KeepItem) => {
+      if (!confirm(`Delete "${item.title}"?`)) return;
+
+      setAllItems((prev) => prev.filter((i) => i.id !== item.id));
+      try {
+        await fetch(`/api/links/${item.id}`, { method: 'DELETE' });
+      } catch {
+        loadItems();
+      }
+    },
+    [loadItems]
+  );
 
   // Clear All Archive Items
-  const handleClearArchive = async () => {
+  const handleClearArchive = useCallback(async () => {
     if (
       !confirm(
-        `Are you sure you want to permanently delete all ${items.length} archived items? This cannot be undone.`
+        `Are you sure you want to permanently delete all ${stats.archiveCount} archived items? This cannot be undone.`
       )
     ) {
       return;
     }
 
     setClearingArchive(true);
-    setItems([]);
-    setStats((prev) => ({ ...prev, archiveCount: 0 }));
+    setAllItems((prev) => prev.filter((i) => i.is_archived === 0));
 
     try {
       await fetch('/api/links?scope=archive', { method: 'DELETE' });
-      await loadItems('archive');
     } catch (err) {
       console.error('Failed to clear archive:', err);
-      loadItems('archive');
+      loadItems();
     } finally {
       setClearingArchive(false);
     }
-  };
+  }, [stats.archiveCount, loadItems]);
 
   if (!authChecked) {
     return (

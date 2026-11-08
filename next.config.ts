@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: 'standalone',
   devIndicators: false,
+  compress: true,
+  poweredByHeader: false,
+  reactStrictMode: true,
   images: {
     unoptimized: true,
   },
@@ -17,11 +20,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: '/(watermark|icon)\\.png',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
         source: '/api/:path*',
         headers: [
           { key: 'Access-Control-Allow-Origin', value: '*' },
           { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PATCH, DELETE, OPTIONS' },
           { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization, x-api-key' },
+          { key: 'Cache-Control', value: 'no-store' },
         ],
       },
       {
