@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifySessionCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { extractFastMetadata, fetchMetadata, isValidHttpUrl } from '@/lib/metadata';
+import { fetchMetadata, isValidHttpUrl } from '@/lib/metadata';
 
 function extractUrl(text: string): string | null {
   const match = text.match(/https?:\/\/[^\s"'<>]+/i);
@@ -44,6 +44,13 @@ const SAVED_HTML = `<!DOCTYPE html>
 </html>`;
 
 export async function GET(req: NextRequest) {
+  // Block cross-site website redirects (CSRF link injection defense) while allowing OS Web Share Target
+  const secFetchSite = req.headers.get('sec-fetch-site');
+  const referer = req.headers.get('referer');
+  if (secFetchSite === 'cross-site' && referer) {
+    return NextResponse.redirect(new URL('/', req.url));
+  }
+
   const { searchParams } = new URL(req.url);
   const rawCandidate = searchParams.get('url') || searchParams.get('text') || '';
   const initialTitle = searchParams.get('title')?.trim().slice(0, 500) || undefined;
@@ -64,9 +71,7 @@ export async function GET(req: NextRequest) {
   const user = verifySessionCookie(sessionCookie?.value);
 
   if (!user) {
-    return NextResponse.redirect(
-      new URL(`/?pending_save=${encodeURIComponent(targetUrl)}`, req.url)
-    );
+    return NextResponse.redirect(new URL('/', req.url));
   }
 
   try {
@@ -76,30 +81,16 @@ export async function GET(req: NextRequest) {
     if (existing) {
       db.update(user.id, existing.id, { is_archived: 0 });
     } else {
-      const fastMeta = extractFastMetadata(normalizedUrl, initialTitle);
-      const item = db.create({
+      const meta = await fetchMetadata(normalizedUrl, initialTitle);
+      db.create({
         user_id: user.id,
-        url: fastMeta.url,
-        title: fastMeta.title,
-        description: fastMeta.description || undefined,
-        image_url: fastMeta.image_url || undefined,
-        favicon_url: fastMeta.favicon_url || undefined,
-        domain: fastMeta.domain,
-        item_type: fastMeta.item_type,
-        youtube_id: fastMeta.youtube_id || undefined,
-      });
-
-      setImmediate(() => {
-        fetchMetadata(normalizedUrl, initialTitle)
-          .then((enriched) => {
-            db.enrichMetadata(user.id, item.id, {
-              title: enriched.title,
-              description: enriched.description,
-              image_url: enriched.image_url,
-              favicon_url: enriched.favicon_url,
-            });
-          })
-          .catch(() => {});
+        url: meta.url,
+        title: meta.title,
+        image_url: meta.image_url,
+        favicon_url: meta.favicon_url,
+        domain: meta.domain,
+        item_type: meta.item_type,
+        youtube_id: meta.youtube_id,
       });
     }
   } catch {

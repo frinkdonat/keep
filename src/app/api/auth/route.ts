@@ -2,50 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getEnvAdminConfig,
   createSessionToken,
-  getAuthenticatedUser,
   getClientIp,
   checkRateLimit,
   recordFailedAttempt,
   clearFailedAttempts,
   readJsonBounded,
 } from '@/lib/auth';
-import { db, verifyPassword, hashPassword } from '@/lib/db';
+import { db, verifyPasswordAsync, hashPasswordSync } from '@/lib/db';
 
-const DUMMY_HASH = hashPassword('dummy_timing_protection_password');
-
-export async function GET(req: NextRequest) {
-  const user = getAuthenticatedUser(req);
-
-  if (!user) {
-    return NextResponse.json({
-      required: true,
-      authenticated: false,
-    });
-  }
-
-  const { isDefaultCredentials } = getEnvAdminConfig();
-
-  return NextResponse.json({
-    required: true,
-    authenticated: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      apiKey: user.api_key,
-    },
-    setupCompleted: user.setup_completed === 1,
-    isDefaultCredentials: user.role === 'admin' ? isDefaultCredentials : false,
-    apiKey: user.api_key,
-  });
-}
+const DUMMY_HASH = hashPasswordSync('dummy_timing_protection_password');
 
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
   const rateLimit = checkRateLimit(ip);
 
   if (!rateLimit.allowed) {
-    const mins = Math.ceil(rateLimit.retryAfterSeconds / 60);
+    const mins = Math.max(1, Math.ceil(rateLimit.retryAfterSeconds / 60));
     return NextResponse.json(
       {
         ok: false,
@@ -62,10 +34,10 @@ export async function POST(req: NextRequest) {
 
     const user = inputUser ? db.getUserByUsername(inputUser) : null;
 
-    // Constant-time password verification even if username does not exist (prevents user enumeration)
+    // Non-blocking constant-time password verification on worker pool
     const passValid = user
-      ? verifyPassword(inputPass, user.password_hash)
-      : verifyPassword(inputPass, DUMMY_HASH) && false;
+      ? await verifyPasswordAsync(inputPass, user.password_hash)
+      : (await verifyPasswordAsync(inputPass, DUMMY_HASH)) && false;
 
     if (user && passValid) {
       clearFailedAttempts(ip);

@@ -11,12 +11,11 @@
 body {
   background-color: var(--background);
   background-image: 
-    radial-gradient(ellipse 80% 45% at 50% -15%, rgba(99, 102, 241, 0.12), transparent),
-    radial-gradient(ellipse 50% 35% at 85% 0%, rgba(139, 92, 246, 0.06), transparent);
-  background-attachment: fixed;
+    radial-gradient(ellipse 80% 45% at 50% -15%, rgba(99, 102, 241, 0.11), transparent),
+    radial-gradient(ellipse 50% 35% at 85% 0%, rgba(139, 92, 246, 0.05), transparent);
+  background-repeat: no-repeat;
   color: var(--foreground);
   font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  overflow-y: scroll;
 }
 
 /* Eliminate sudden focus border flash on click across all interactive elements */

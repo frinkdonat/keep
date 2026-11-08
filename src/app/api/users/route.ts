@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const created = db.createUser(username, password);
+    const created = await db.createUser(username, password);
     return NextResponse.json({ ok: true, user: created }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to create user';

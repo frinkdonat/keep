@@ -8,7 +8,6 @@ import {
   CreateItemInput,
   UpdateItemInput,
   FilterCategory,
-  ItemStats,
   UserRecord,
   PublicUser,
 } from './types';
@@ -58,13 +57,23 @@ export function getEnvAdminConfig() {
   return { username, password, apiKey, isDefaultCredentials };
 }
 
-export function hashPassword(password: string, existingSalt?: string): string {
+export function hashPasswordSync(password: string, existingSalt?: string): string {
   const salt = existingSalt || crypto.randomBytes(16).toString('hex');
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
   return `${salt}:${derived}`;
 }
 
-export function verifyPassword(password: string, storedHash: string): boolean {
+export function hashPasswordAsync(password: string, existingSalt?: string): Promise<string> {
+  const salt = existingSalt || crypto.randomBytes(16).toString('hex');
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(`${salt}:${derivedKey.toString('hex')}`);
+    });
+  });
+}
+
+export function verifyPasswordSync(password: string, storedHash: string): boolean {
   const parts = storedHash.split(':');
   if (parts.length !== 2) return false;
   const [salt, keyHex] = parts;
@@ -72,6 +81,26 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   const keyBuf = Buffer.from(keyHex, 'hex');
   if (derived.length !== keyBuf.length) return false;
   return crypto.timingSafeEqual(derived, keyBuf);
+}
+
+/**
+ * Asynchronous password verification on libuv worker pool so login attempts
+ * never block the main Node.js event loop thread.
+ */
+export function verifyPasswordAsync(password: string, storedHash: string): Promise<boolean> {
+  const parts = storedHash.split(':');
+  if (parts.length !== 2) return Promise.resolve(false);
+  const [salt, keyHex] = parts;
+  const keyBuf = Buffer.from(keyHex, 'hex');
+
+  return new Promise((resolve) => {
+    crypto.scrypt(password, salt, 64, (err, derived) => {
+      if (err || derived.length !== keyBuf.length) {
+        return resolve(false);
+      }
+      resolve(crypto.timingSafeEqual(derived, keyBuf));
+    });
+  });
 }
 
 export function generateApiKey(): string {
@@ -92,6 +121,11 @@ export function computeSessionToken(user: UserRecord): {
   };
 }
 
+const LINK_COLUMNS = `
+  id, user_id, url, title, image_url, favicon_url, domain,
+  item_type, youtube_id, is_archived, created_at, updated_at
+`;
+
 interface PreparedStatements {
   getAllUsersWithCounts: StatementSync;
   insertUser: StatementSync;
@@ -104,17 +138,13 @@ interface PreparedStatements {
 
   getLinksAll: StatementSync;
   getLinksInbox: StatementSync;
-  getLinksVideos: StatementSync;
-  getLinksArticles: StatementSync;
   getLinksArchive: StatementSync;
   getLinkById: StatementSync;
   getLinkByUrl: StatementSync;
   insertLink: StatementSync;
-  enrichLinkMeta: StatementSync;
   updateLinkArchive: StatementSync;
   deleteLinkById: StatementSync;
   clearUserArchive: StatementSync;
-  getUserStats: StatementSync;
 }
 
 interface DbContext {
@@ -127,12 +157,7 @@ interface DbContext {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __keep_db_ctx__: DbContext | undefined;
-  // eslint-disable-next-line no-var
-  var __keep_maintenance_timer__: NodeJS.Timeout | undefined;
-  // eslint-disable-next-line no-var
-  var __keep_last_maintenance_time__: number | undefined;
 }
 
 function rebuildUserCache(
@@ -165,94 +190,40 @@ function bumpRevision(ctx: DbContext, userId: string): void {
   ctx.userRevisions.set(userId, current + 1);
 }
 
+/**
+ * Converts a node:sqlite row into a plain JS object for React Server Components
+ * and deterministically guarantees a working Google S2 favicon and YouTube hqdefault thumbnail.
+ */
 function toPlainItem(row: unknown): KeepItem {
   const r = row as KeepItem;
+  const domain = r.domain ? String(r.domain).replace(/^www\./, '') : null;
+  const youtubeId = r.youtube_id ? String(r.youtube_id) : null;
+
+  let imageUrl = r.image_url ? String(r.image_url) : null;
+  if (youtubeId) {
+    if (!imageUrl || imageUrl.includes('/maxresdefault.jpg')) {
+      imageUrl = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
+    }
+  }
+
+  const faviconUrl = domain
+    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
+    : null;
+
   return {
     id: String(r.id),
     user_id: String(r.user_id),
     url: String(r.url),
     title: String(r.title || r.url),
-    description: r.description ? String(r.description) : null,
-    image_url: r.image_url ? String(r.image_url) : null,
-    favicon_url: r.favicon_url ? String(r.favicon_url) : null,
-    domain: r.domain ? String(r.domain) : null,
-    item_type: r.item_type || 'website',
-    youtube_id: r.youtube_id ? String(r.youtube_id) : null,
+    image_url: imageUrl,
+    favicon_url: faviconUrl,
+    domain,
+    item_type: r.item_type === 'youtube' ? 'youtube' : 'website',
+    youtube_id: youtubeId,
     is_archived: Number(r.is_archived) === 1 ? 1 : 0,
-    is_favorite: Number(r.is_favorite) === 1 ? 1 : 0,
-    notes: r.notes ? String(r.notes) : null,
     created_at: Number(r.created_at),
     updated_at: Number(r.updated_at),
   };
-}
-
-export function runMaintenance(): { success: boolean; timeMs: number } {
-  const start = Date.now();
-  try {
-    const ctx = getContext();
-    ctx.database.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-    ctx.database.exec('PRAGMA optimize;');
-    ctx.database.exec('PRAGMA quick_check;');
-    global.__keep_last_maintenance_time__ = Date.now();
-    return { success: true, timeMs: Date.now() - start };
-  } catch (err) {
-    console.error('SQLite maintenance error:', err);
-    return { success: false, timeMs: Date.now() - start };
-  }
-}
-
-export function createDailyBackup(): { success: boolean; filePath?: string; error?: string } {
-  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
-  const backupsDir = path.join(dataDir, 'backups');
-  if (!fs.existsSync(backupsDir)) {
-    fs.mkdirSync(backupsDir, { recursive: true });
-  }
-
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const backupPath = path.join(backupsDir, `keep-backup-${dateStr}.db`);
-
-  try {
-    const ctx = getContext();
-    if (fs.existsSync(backupPath)) {
-      try {
-        fs.unlinkSync(backupPath);
-      } catch {}
-    }
-
-    const safePath = backupPath.replace(/'/g, "''");
-    ctx.database.exec(`VACUUM INTO '${safePath}';`);
-
-    // Rotate: keep only the 3 most recent backups
-    const files = fs
-      .readdirSync(backupsDir)
-      .filter((f) => f.startsWith('keep-backup-') && f.endsWith('.db'))
-      .sort();
-
-    while (files.length > 3) {
-      const oldest = files.shift();
-      if (oldest) {
-        try {
-          fs.unlinkSync(path.join(backupsDir, oldest));
-        } catch {}
-      }
-    }
-
-    return { success: true, filePath: backupPath };
-  } catch (err) {
-    console.error('SQLite backup creation error:', err);
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export function checkAndRunDailyBackup(): void {
-  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
-  const backupsDir = path.join(dataDir, 'backups');
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const backupPath = path.join(backupsDir, `keep-backup-${dateStr}.db`);
-
-  if (!fs.existsSync(backupPath)) {
-    createDailyBackup();
-  }
 }
 
 function getContext(): DbContext {
@@ -262,18 +233,17 @@ function getContext(): DbContext {
 
   const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
   if (!fs.existsSync(/*turbopackIgnore: true*/ dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   }
 
   const dbPath = path.join(dataDir, 'keep.db');
   const database = new DatabaseSync(dbPath);
 
-  // Maximum SQLite performance tuning
+  // SQLite WAL performance configuration (zero maintenance required)
   database.exec('PRAGMA journal_mode = WAL;');
   database.exec('PRAGMA synchronous = NORMAL;');
-  database.exec('PRAGMA cache_size = -32000;'); // 32MB page cache
+  database.exec('PRAGMA cache_size = -16000;'); // 16MB page cache
   database.exec('PRAGMA temp_store = MEMORY;');
-  database.exec('PRAGMA mmap_size = 134217728;'); // 128MB memory-mapped I/O
   database.exec('PRAGMA busy_timeout = 5000;');
 
   database.exec(`
@@ -305,30 +275,9 @@ function getContext(): DbContext {
       updated_at INTEGER NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-
-  const columns = database.prepare('PRAGMA table_info(links)').all() as Array<{ name: string }>;
-  if (!columns.some((c) => c.name === 'user_id')) {
-    database.exec("ALTER TABLE links ADD COLUMN user_id TEXT NOT NULL DEFAULT 'admin';");
-  }
-
-  database.exec(`
     CREATE INDEX IF NOT EXISTS idx_links_user_created ON links (user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_links_user_archived_created ON links (user_id, is_archived, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_links_user_type_archived ON links (user_id, item_type, is_archived, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_links_user_url ON links (user_id, url);
-  `);
-
-  // Automatically repair any legacy YouTube favicons or broken maxresdefault thumbnails
-  database.exec(`
-    UPDATE links
-    SET favicon_url = 'https://www.google.com/s2/favicons?domain=youtube.com&sz=64',
-        image_url = REPLACE(image_url, '/maxresdefault.jpg', '/hqdefault.jpg')
-    WHERE item_type = 'youtube';
   `);
 
   // Sync primary admin account from environment variables
@@ -338,27 +287,21 @@ function getContext(): DbContext {
     .get() as unknown as UserRecord | undefined;
 
   if (!existingAdmin) {
-    const legacySetup = database
-      .prepare("SELECT value FROM settings WHERE key = 'onboarding_completed'")
-      .get() as { value: string } | undefined;
-    const setupDone = legacySetup?.value === '1' ? 1 : 0;
-
     database
       .prepare(
         `INSERT INTO users (id, username, password_hash, api_key, role, setup_completed, created_at)
-         VALUES ('admin', ?, ?, ?, 'admin', ?, ?)`
+         VALUES ('admin', ?, ?, ?, 'admin', 0, ?)`
       )
       .run(
         envAdmin.username,
-        hashPassword(envAdmin.password),
+        hashPasswordSync(envAdmin.password),
         envAdmin.apiKey,
-        setupDone,
         Date.now()
       );
   } else {
     const usernameChanged = existingAdmin.username !== envAdmin.username;
     const apiKeyChanged = existingAdmin.api_key !== envAdmin.apiKey;
-    const passwordChanged = !verifyPassword(envAdmin.password, existingAdmin.password_hash);
+    const passwordChanged = !verifyPasswordSync(envAdmin.password, existingAdmin.password_hash);
 
     if (usernameChanged || apiKeyChanged || passwordChanged) {
       database
@@ -367,13 +310,12 @@ function getContext(): DbContext {
         )
         .run(
           envAdmin.username,
-          passwordChanged ? hashPassword(envAdmin.password) : existingAdmin.password_hash,
+          passwordChanged ? hashPasswordSync(envAdmin.password) : existingAdmin.password_hash,
           envAdmin.apiKey
         );
     }
   }
 
-  // Pre-compile all hot-path SQL statements once
   const stmts: PreparedStatements = {
     getAllUsersWithCounts: database.prepare(`
       SELECT 
@@ -396,33 +338,25 @@ function getContext(): DbContext {
     countUserLinks: database.prepare('SELECT COUNT(*) as c FROM links WHERE user_id = ?'),
 
     getLinksAll: database.prepare(
-      'SELECT * FROM links WHERE user_id = ? ORDER BY created_at DESC'
+      `SELECT ${LINK_COLUMNS} FROM links WHERE user_id = ? ORDER BY created_at DESC`
     ),
     getLinksInbox: database.prepare(
-      'SELECT * FROM links WHERE user_id = ? AND is_archived = 0 ORDER BY created_at DESC'
-    ),
-    getLinksVideos: database.prepare(
-      "SELECT * FROM links WHERE user_id = ? AND item_type = 'youtube' AND is_archived = 0 ORDER BY created_at DESC"
-    ),
-    getLinksArticles: database.prepare(
-      "SELECT * FROM links WHERE user_id = ? AND item_type = 'website' AND is_archived = 0 ORDER BY created_at DESC"
+      `SELECT ${LINK_COLUMNS} FROM links WHERE user_id = ? AND is_archived = 0 ORDER BY created_at DESC`
     ),
     getLinksArchive: database.prepare(
-      'SELECT * FROM links WHERE user_id = ? AND is_archived = 1 ORDER BY created_at DESC'
+      `SELECT ${LINK_COLUMNS} FROM links WHERE user_id = ? AND is_archived = 1 ORDER BY created_at DESC`
     ),
-    getLinkById: database.prepare('SELECT * FROM links WHERE id = ? AND user_id = ?'),
-    getLinkByUrl: database.prepare('SELECT * FROM links WHERE user_id = ? AND url = ?'),
+    getLinkById: database.prepare(
+      `SELECT ${LINK_COLUMNS} FROM links WHERE id = ? AND user_id = ?`
+    ),
+    getLinkByUrl: database.prepare(
+      `SELECT ${LINK_COLUMNS} FROM links WHERE user_id = ? AND url = ?`
+    ),
     insertLink: database.prepare(`
       INSERT INTO links (
-        id, user_id, url, title, description, image_url, favicon_url, domain,
-        item_type, youtube_id, is_archived, is_favorite, notes,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
-    `),
-    enrichLinkMeta: database.prepare(`
-      UPDATE links
-      SET title = ?, description = ?, image_url = ?, favicon_url = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?
+        id, user_id, url, title, image_url, favicon_url, domain,
+        item_type, youtube_id, is_archived, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     `),
     updateLinkArchive: database.prepare(`
       UPDATE links
@@ -433,16 +367,6 @@ function getContext(): DbContext {
     clearUserArchive: database.prepare(
       'DELETE FROM links WHERE user_id = ? AND is_archived = 1'
     ),
-    getUserStats: database.prepare(`
-      SELECT
-        COUNT(CASE WHEN is_archived = 0 THEN 1 END) as inboxCount,
-        COUNT(CASE WHEN item_type = 'youtube' AND is_archived = 0 THEN 1 END) as videosCount,
-        COUNT(CASE WHEN item_type = 'website' AND is_archived = 0 THEN 1 END) as articlesCount,
-        COUNT(CASE WHEN is_archived = 1 THEN 1 END) as archiveCount,
-        COUNT(*) as totalCount
-      FROM links
-      WHERE user_id = ?
-    `),
   };
 
   const usersById = new Map<string, CachedUser>();
@@ -461,37 +385,10 @@ function getContext(): DbContext {
   };
 
   global.__keep_db_ctx__ = ctx;
-
-  // Initialize automated background maintenance (every 6 hours) & rolling daily backups
-  if (!global.__keep_maintenance_timer__) {
-    const SIX_HOURS = 6 * 60 * 60 * 1000;
-    const timer = setInterval(() => {
-      runMaintenance();
-      checkAndRunDailyBackup();
-    }, SIX_HOURS);
-    timer.unref();
-    global.__keep_maintenance_timer__ = timer;
-
-    // Trigger initial backup check 20 seconds after server start
-    setTimeout(() => {
-      checkAndRunDailyBackup();
-    }, 20000).unref();
-
-    // Hook process exit to flush WAL cleanly
-    const cleanup = () => {
-      try {
-        database.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-      } catch {}
-    };
-    process.once('SIGINT', cleanup);
-    process.once('SIGTERM', cleanup);
-  }
-
   return ctx;
 }
 
 export const db = {
-  // --- O(1) IN-MEMORY USER & REVISION LOOKUPS ---
   getUserById(id: string): CachedUser | null {
     return getContext().usersById.get(id) || null;
   },
@@ -531,7 +428,7 @@ export const db = {
     }));
   },
 
-  createUser(username: string, password: string): PublicUser {
+  async createUser(username: string, password: string): Promise<PublicUser> {
     const ctx = getContext();
     const cleanUsername = username.trim();
     if (ctx.usersByUsername.has(cleanUsername.toLowerCase())) {
@@ -540,7 +437,7 @@ export const db = {
 
     const id = crypto.randomUUID();
     const apiKey = generateApiKey();
-    const passHash = hashPassword(password);
+    const passHash = await hashPasswordAsync(password);
     const now = Date.now();
 
     ctx.stmts.insertUser.run(id, cleanUsername, passHash, apiKey, now);
@@ -557,15 +454,16 @@ export const db = {
     };
   },
 
-  updateUser(
+  async updateUser(
     id: string,
     updates: { password?: string; regenerateApiKey?: boolean }
-  ): PublicUser | null {
+  ): Promise<PublicUser | null> {
     const ctx = getContext();
     if (!ctx.usersById.has(id)) return null;
 
     if (updates.password) {
-      ctx.stmts.updateUserPassword.run(hashPassword(updates.password), id);
+      const passHash = await hashPasswordAsync(updates.password);
+      ctx.stmts.updateUserPassword.run(passHash, id);
     }
 
     if (updates.regenerateApiKey) {
@@ -606,19 +504,12 @@ export const db = {
     }
   },
 
-  // --- PRE-COMPILED WORKSPACE LINK OPERATIONS ---
   getAll(userId: string, filter: FilterCategory = 'inbox'): KeepItem[] {
     const { stmts } = getContext();
     let rows: unknown[];
     switch (filter) {
       case 'all':
         rows = stmts.getLinksAll.all(userId);
-        break;
-      case 'videos':
-        rows = stmts.getLinksVideos.all(userId);
-        break;
-      case 'articles':
-        rows = stmts.getLinksArticles.all(userId);
         break;
       case 'archive':
         rows = stmts.getLinksArchive.all(userId);
@@ -648,77 +539,43 @@ export const db = {
     const id = crypto.randomUUID();
     const now = Date.now();
 
-    const item: KeepItem = {
+    const rawRow = {
       id,
       user_id: input.user_id,
       url: input.url,
       title: input.title || input.url,
-      description: input.description || null,
       image_url: input.image_url || null,
       favicon_url: input.favicon_url || null,
       domain: input.domain || null,
       item_type: input.item_type || 'website',
       youtube_id: input.youtube_id || null,
       is_archived: 0,
-      is_favorite: 0,
-      notes: input.notes || null,
       created_at: now,
       updated_at: now,
     };
 
     ctx.stmts.insertLink.run(
-      item.id,
-      item.user_id,
-      item.url,
-      item.title,
-      item.description,
-      item.image_url,
-      item.favicon_url,
-      item.domain,
-      item.item_type,
-      item.youtube_id,
-      item.notes,
-      item.created_at,
-      item.updated_at
+      rawRow.id,
+      rawRow.user_id,
+      rawRow.url,
+      rawRow.title,
+      rawRow.image_url,
+      rawRow.favicon_url,
+      rawRow.domain,
+      rawRow.item_type,
+      rawRow.youtube_id,
+      rawRow.created_at,
+      rawRow.updated_at
     );
 
     bumpRevision(ctx, input.user_id);
-    return item;
-  },
-
-  enrichMetadata(
-    userId: string,
-    id: string,
-    meta: {
-      title: string;
-      description: string | null;
-      image_url: string | null;
-      favicon_url: string | null;
-    }
-  ): void {
-    const ctx = getContext();
-    ctx.stmts.enrichLinkMeta.run(
-      meta.title,
-      meta.description,
-      meta.image_url,
-      meta.favicon_url,
-      Date.now(),
-      id,
-      userId
-    );
-    bumpRevision(ctx, userId);
+    return toPlainItem(rawRow);
   },
 
   update(userId: string, id: string, input: UpdateItemInput): KeepItem | null {
     const ctx = getContext();
 
-    // Fast path for the most frequent operation: toggling archive status
-    if (
-      input.is_archived !== undefined &&
-      input.title === undefined &&
-      input.description === undefined &&
-      input.notes === undefined
-    ) {
+    if (input.is_archived !== undefined && input.title === undefined) {
       const now = Date.now();
       const archivedVal = input.is_archived ? 1 : 0;
       const res = ctx.stmts.updateLinkArchive.run(archivedVal, now, id, userId);
@@ -737,17 +594,9 @@ export const db = {
       fields.push('title = ?');
       params.push(input.title);
     }
-    if (input.description !== undefined) {
-      fields.push('description = ?');
-      params.push(input.description);
-    }
     if (input.is_archived !== undefined) {
       fields.push('is_archived = ?');
       params.push(input.is_archived ? 1 : 0);
-    }
-    if (input.notes !== undefined) {
-      fields.push('notes = ?');
-      params.push(input.notes);
     }
 
     params.push(id, userId);
@@ -772,25 +621,5 @@ export const db = {
     const count = Number(result.changes) > 0 ? Number(result.changes) : 0;
     if (count > 0) bumpRevision(ctx, userId);
     return count;
-  },
-
-  getStats(userId: string): ItemStats {
-    const { stmts } = getContext();
-    const statsQuery = stmts.getUserStats.get(userId) as {
-      inboxCount: number | bigint;
-      videosCount: number | bigint;
-      articlesCount: number | bigint;
-      archiveCount: number | bigint;
-      totalCount: number | bigint;
-    };
-
-    return {
-      inboxCount: Number(statsQuery.inboxCount),
-      videosCount: Number(statsQuery.videosCount),
-      articlesCount: Number(statsQuery.articlesCount),
-      favoritesCount: 0,
-      archiveCount: Number(statsQuery.archiveCount),
-      totalCount: Number(statsQuery.totalCount),
-    };
   },
 };

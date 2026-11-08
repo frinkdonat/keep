@@ -23,7 +23,6 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: 'any',
       },
     ],
-    // Web Share Target API: enables sharing links from mobile Chrome/Safari/YouTube app directly to Keep
     share_target: {
       action: '/share',
       method: 'GET',
@@ -32,6 +31,6 @@ export default function manifest(): MetadataRoute.Manifest {
         text: 'text',
         url: 'url',
       },
-    } as any,
+    } as unknown as MetadataRoute.Manifest['share_target'],
   };
 }

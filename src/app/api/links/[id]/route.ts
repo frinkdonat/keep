@@ -20,14 +20,8 @@ export async function PATCH(
     if (typeof body.title === 'string') {
       sanitized.title = body.title.trim().slice(0, 500);
     }
-    if (typeof body.description === 'string') {
-      sanitized.description = body.description.trim().slice(0, 1000);
-    }
     if (body.is_archived !== undefined) {
       sanitized.is_archived = body.is_archived ? 1 : 0;
-    }
-    if (typeof body.notes === 'string') {
-      sanitized.notes = body.notes.trim().slice(0, 1000);
     }
 
     const updated = db.update(user.id, id, sanitized);

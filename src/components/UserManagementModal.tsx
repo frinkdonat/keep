@@ -18,11 +18,10 @@ import {
 import { PublicUser } from '@/lib/types';
 
 interface UserManagementModalProps {
-  isOpen: boolean;
   onClose: () => void;
 }
 
-export function UserManagementModal({ isOpen, onClose }: UserManagementModalProps) {
+export function UserManagementModal({ onClose }: UserManagementModalProps) {
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [username, setUsername] = useState('');
@@ -34,7 +33,6 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await fetch('/api/users');
       if (res.ok) {
@@ -49,15 +47,20 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      loadUsers();
-      setUsername('');
-      setPassword('');
-      setErrorMsg('');
-      setConfirmRegenId(null);
-      setConfirmDeleteId(null);
-    }
-  }, [isOpen, loadUsers]);
+    let active = true;
+    fetch('/api/users')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.users) setUsers(data.users);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!confirmRegenId) return;
@@ -72,15 +75,12 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
   }, [confirmDeleteId]);
 
   useEffect(() => {
-    if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
+  }, [onClose]);
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -366,13 +366,6 @@ export function UserManagementModal({ isOpen, onClose }: UserManagementModalProp
               </div>
             )}
           </div>
-        </div>
-
-        {/* Subtle Footer Note: Automated Backups Location */}
-        <div className="border-t border-white/[0.06] px-6 py-3 bg-[#0b0b0f] text-center select-none">
-          <p className="text-[11px] text-zinc-500 font-mono">
-            Backups are automatically saved to <span className="text-zinc-400 font-medium">/app/data/backups/</span>
-          </p>
         </div>
       </div>
     </div>

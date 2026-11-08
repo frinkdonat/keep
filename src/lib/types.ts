@@ -27,46 +27,35 @@ export interface KeepItem {
   user_id: string;
   url: string;
   title: string;
-  description: string | null;
   image_url: string | null;
   favicon_url: string | null;
   domain: string | null;
   item_type: ItemType;
   youtube_id: string | null;
   is_archived: number; // 0 or 1
-  is_favorite: number; // 0 or 1
-  notes: string | null;
   created_at: number; // unix timestamp in ms
   updated_at: number; // unix timestamp in ms
 }
 
-export type FilterCategory = 'inbox' | 'videos' | 'articles' | 'archive' | 'all';
+export type FilterCategory = 'inbox' | 'archive' | 'all';
 
 export interface CreateItemInput {
   user_id: string;
   url: string;
   title?: string;
-  description?: string;
-  image_url?: string;
-  favicon_url?: string;
+  image_url?: string | null;
+  favicon_url?: string | null;
   domain?: string;
   item_type?: ItemType;
-  youtube_id?: string;
-  notes?: string;
+  youtube_id?: string | null;
 }
 
 export interface UpdateItemInput {
   title?: string;
-  description?: string;
   is_archived?: boolean | number;
-  notes?: string;
 }
 
 export interface ItemStats {
   inboxCount: number;
-  videosCount: number;
-  articlesCount: number;
-  favoritesCount: number;
   archiveCount: number;
-  totalCount: number;
 }

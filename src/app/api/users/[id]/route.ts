@@ -34,7 +34,7 @@ export async function PATCH(
       );
     }
 
-    const updated = db.updateUser(id, { password, regenerateApiKey });
+    const updated = await db.updateUser(id, { password, regenerateApiKey });
     if (!updated) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }

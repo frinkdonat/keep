@@ -6,16 +6,6 @@ import { UserRecord } from './types';
 export { getEnvAdminConfig };
 
 /**
- * Constant-time string comparison immune to length and timing side-channel attacks
- */
-export function safeCompare(a: string, b: string): boolean {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const hashA = crypto.createHash('sha256').update(a).digest();
-  const hashB = crypto.createHash('sha256').update(b).digest();
-  return crypto.timingSafeEqual(hashA, hashB) && a.length === b.length;
-}
-
-/**
  * Returns the pre-computed HMAC-SHA256 session cookie token for a user,
  * or computes it if passed a raw UserRecord.
  */
@@ -37,7 +27,6 @@ export function verifySessionCookie(cookieValue: string | undefined): CachedUser
   const userId = cookieValue.slice(0, dotIdx);
   const sigHex = cookieValue.slice(dotIdx + 1);
 
-  // SHA-256 hex digest is always exactly 64 hex chars (32 bytes)
   if (sigHex.length !== 64 || !/^[0-9a-f]{64}$/i.test(sigHex)) return null;
 
   const user = db.getUserById(userId);
@@ -54,7 +43,6 @@ export function verifySessionCookie(cookieValue: string | undefined): CachedUser
 
 /**
  * CSRF protection for cookie-authenticated state-changing requests (POST, PATCH, DELETE).
- * API Key clients (Chrome Extension) are exempt because custom headers cannot be sent cross-site without CORS preflight.
  */
 export function verifyCsrfOrigin(req: NextRequest): boolean {
   const method = req.method.toUpperCase();
@@ -62,10 +50,8 @@ export function verifyCsrfOrigin(req: NextRequest): boolean {
     return true;
   }
 
-  // Modern browsers send Sec-Fetch-Site on all requests
   const secFetchSite = req.headers.get('sec-fetch-site');
   if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
-    // Allow Chrome extension origins
     const origin = req.headers.get('origin') || '';
     if (!origin.startsWith('chrome-extension://') && !origin.startsWith('moz-extension://')) {
       return false;
@@ -97,7 +83,6 @@ export function verifyCsrfOrigin(req: NextRequest): boolean {
  * or signed HttpOnly session cookie (Web UI).
  */
 export function getAuthenticatedUser(req: NextRequest): CachedUser | null {
-  // 1. Check API Key header (Chrome Extension or API client)
   const authHeader = req.headers.get('authorization');
   const xApiKey = req.headers.get('x-api-key');
 
@@ -128,7 +113,6 @@ export function getAuthenticatedUser(req: NextRequest): CachedUser | null {
     return null;
   }
 
-  // 2. Check signed web session cookie (+ CSRF Origin verification for mutations)
   const sessionCookie = req.cookies.get('keep_session');
   const user = verifySessionCookie(sessionCookie?.value);
   if (!user) return null;
@@ -144,7 +128,6 @@ export function isAuthorized(req: NextRequest): boolean {
   return getAuthenticatedUser(req) !== null;
 }
 
-// Bounded LRU Brute-force protection (prevents memory exhaustion DoS from spoofed IPs)
 interface RateLimitEntry {
   count: number;
   resetAt: number;
@@ -155,18 +138,42 @@ const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_TRACKED_IPS = 2000;
 const loginAttempts = new Map<string, RateLimitEntry>();
 
+// Global anti-spoofing rate limit (caps brute-force velocity even if X-Forwarded-For is spoofed)
+const GLOBAL_MAX_FAILED_PER_MIN = 25;
+const GLOBAL_WINDOW_MS = 60 * 1000;
+let globalFailedCount = 0;
+let globalResetAt = 0;
+
+/**
+ * Extracts client IP securely: prioritizes Cloudflare's unforgeable CF-Connecting-IP,
+ * then X-Real-IP, then the rightmost hop of X-Forwarded-For.
+ */
 export function getClientIp(req: NextRequest): string {
+  const cfIp = req.headers.get('cf-connecting-ip');
+  if (cfIp) return cfIp.trim().slice(0, 64);
+
+  const realIp = req.headers.get('x-real-ip');
+  if (realIp) return realIp.trim().slice(0, 64);
+
   const forwarded = req.headers.get('x-forwarded-for');
   if (forwarded) {
-    return forwarded.split(',')[0].trim().slice(0, 64);
+    const hops = forwarded.split(',');
+    return hops[hops.length - 1].trim().slice(0, 64);
   }
-  return (req.headers.get('x-real-ip') || 'local').slice(0, 64);
+  return 'local';
 }
 
 export function checkRateLimit(ip: string): { allowed: boolean; retryAfterSeconds: number } {
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
 
+  if (now < globalResetAt && globalFailedCount >= GLOBAL_MAX_FAILED_PER_MIN) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((globalResetAt - now) / 1000)),
+    };
+  }
+
+  const entry = loginAttempts.get(ip);
   if (!entry) {
     return { allowed: true, retryAfterSeconds: 0 };
   }
@@ -186,8 +193,15 @@ export function checkRateLimit(ip: string): { allowed: boolean; retryAfterSecond
 
 export function recordFailedAttempt(ip: string): void {
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
 
+  if (now > globalResetAt) {
+    globalFailedCount = 1;
+    globalResetAt = now + GLOBAL_WINDOW_MS;
+  } else {
+    globalFailedCount++;
+  }
+
+  const entry = loginAttempts.get(ip);
   if (!entry || now > entry.resetAt) {
     if (loginAttempts.size >= MAX_TRACKED_IPS) {
       const oldestKey = loginAttempts.keys().next().value;
@@ -195,7 +209,6 @@ export function recordFailedAttempt(ip: string): void {
     }
     loginAttempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
   } else {
-    // Refresh LRU order
     loginAttempts.delete(ip);
     loginAttempts.set(ip, { count: entry.count + 1, resetAt: entry.resetAt });
   }

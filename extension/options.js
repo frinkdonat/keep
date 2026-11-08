@@ -54,7 +54,7 @@ btnTest.addEventListener('click', async () => {
     } else {
       showStatus(`⚠️ Server returned HTTP ${res.status}: ${res.statusText}`, true);
     }
-  } catch (err) {
+  } catch {
     showStatus(`✗ Connection failed: Could not reach ${serverUrl}. Is Keep running?`, true);
   }
 });

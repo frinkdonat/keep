@@ -5,15 +5,13 @@ import { ItemType } from './types';
 export interface ExtractedMetadata {
   url: string;
   title: string;
-  description: string | null;
   image_url: string | null;
-  favicon_url: string | null;
+  favicon_url: string;
   domain: string;
   item_type: ItemType;
   youtube_id: string | null;
 }
 
-// In-memory LRU cache for scraped URLs (zero network cost for repeated URLs)
 const META_CACHE_LIMIT = 500;
 const metadataCache = new Map<string, ExtractedMetadata>();
 
@@ -54,10 +52,8 @@ export function isPrivateOrReservedIp(ip: string): boolean {
       return true;
     }
     const [a, b] = parts;
-    if (a === 0) return true;
-    if (a === 10) return true;
+    if (a === 0 || a === 10 || a === 127) return true;
     if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a === 127) return true;
     if (a === 169 && b === 254) return true;
     if (a === 172 && b >= 16 && b <= 31) return true;
     if (a === 192 && b === 168) return true;
@@ -83,15 +79,10 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   return true;
 }
 
-// In-memory LRU cache for DNS SSRF checks (avoids repeated DNS lookups for known safe domains)
 const DNS_CACHE_LIMIT = 1000;
-const DNS_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const DNS_TTL_MS = 10 * 60 * 1000;
 const dnsSafetyCache = new Map<string, { safe: boolean; expiresAt: number }>();
 
-/**
- * SSRF & DNS Rebinding guard: verifies both the hostname string and all resolved A/AAAA records
- * point exclusively to public internet addresses.
- */
 async function isSafePublicUrl(parsed: URL): Promise<boolean> {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
   if (parsed.username || parsed.password) return false;
@@ -162,13 +153,9 @@ export function extractYouTubeId(url: string): string | null {
 
     if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
       const v = parsed.searchParams.get('v');
-      if (v && /^[\w-]{11}$/.test(v)) {
-        return v;
-      }
+      if (v && /^[\w-]{11}$/.test(v)) return v;
       const match = /^\/(?:shorts|embed|live|v)\/([\w-]{11})/.exec(parsed.pathname);
-      if (match && match[1]) {
-        return match[1];
-      }
+      if (match && match[1]) return match[1];
     }
   } catch {
     // ignore
@@ -195,19 +182,22 @@ function decodeHtmlEntities(str: string): string {
 }
 
 /**
- * Zero-DOM-allocation <head> parser (~20x faster than constructing a full Cheerio DOM tree).
+ * Lightweight <head> parser that extracts ONLY title and og:image.
+ * Favicons are never scraped from HTML so broken/relative site icons never occur.
  */
-function parseHeadMetadata(htmlHead: string): {
+function parseHeadTitleAndImage(htmlHead: string): {
   title?: string;
-  description?: string;
   image?: string;
-  icon?: string;
 } {
-  const metaMap = new Map<string, string>();
-  const attrRegex = /([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))/g;
+  let ogTitle = '';
+  let twitterTitle = '';
+  let ogImage = '';
+  let twitterImage = '';
 
+  const attrRegex = /([a-zA-Z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+))/g;
   const metaTagRegex = /<meta\b[^>]*>/gi;
   let tagMatch: RegExpExecArray | null;
+
   while ((tagMatch = metaTagRegex.exec(htmlHead)) !== null) {
     const tag = tagMatch[0];
     let key = '';
@@ -223,52 +213,31 @@ function parseHeadMetadata(htmlHead: string): {
         content = val;
       }
     }
-    if (key && content && !metaMap.has(key)) {
-      metaMap.set(key, decodeHtmlEntities(content).trim());
-    }
+    if (!key || !content) continue;
+    if (key === 'og:title' && !ogTitle) ogTitle = decodeHtmlEntities(content).trim();
+    else if (key === 'twitter:title' && !twitterTitle) twitterTitle = decodeHtmlEntities(content).trim();
+    else if (key === 'og:image' && !ogImage) ogImage = decodeHtmlEntities(content).trim();
+    else if (key === 'twitter:image' && !twitterImage) twitterImage = decodeHtmlEntities(content).trim();
   }
 
   let pageTitle = '';
-  const titleMatch = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(htmlHead);
-  if (titleMatch && titleMatch[1]) {
-    pageTitle = decodeHtmlEntities(titleMatch[1]).replace(/\s+/g, ' ').trim();
-  }
-
-  let icon = '';
-  const linkTagRegex = /<link\b[^>]*>/gi;
-  while ((tagMatch = linkTagRegex.exec(htmlHead)) !== null) {
-    const tag = tagMatch[0];
-    let rel = '';
-    let href = '';
-    attrRegex.lastIndex = 0;
-    let attr: RegExpExecArray | null;
-    while ((attr = attrRegex.exec(tag)) !== null) {
-      const name = attr[1].toLowerCase();
-      const val = attr[2] ?? attr[3] ?? attr[4] ?? '';
-      if (name === 'rel') rel = val.toLowerCase();
-      else if (name === 'href') href = val.trim();
-    }
-    if (href && (rel.includes('icon') || rel.includes('apple-touch-icon'))) {
-      icon = decodeHtmlEntities(href);
-      break;
+  if (!ogTitle && !twitterTitle) {
+    const titleMatch = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(htmlHead);
+    if (titleMatch && titleMatch[1]) {
+      pageTitle = decodeHtmlEntities(titleMatch[1]).replace(/\s+/g, ' ').trim();
     }
   }
 
   return {
-    title: metaMap.get('og:title') || metaMap.get('twitter:title') || pageTitle || undefined,
-    description:
-      metaMap.get('og:description') ||
-      metaMap.get('twitter:description') ||
-      metaMap.get('description') ||
-      undefined,
-    image: metaMap.get('og:image') || metaMap.get('twitter:image') || undefined,
-    icon: icon || undefined,
+    title: ogTitle || twitterTitle || pageTitle || undefined,
+    image: ogImage || twitterImage || undefined,
   };
 }
 
-/**
- * Synchronous, zero-I/O metadata extraction (< 0.05ms) for instant item creation
- */
+export function getGoogleFaviconUrl(domain: string): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+}
+
 export function extractFastMetadata(
   targetUrl: string,
   initialTitle?: string
@@ -286,16 +255,15 @@ export function extractFastMetadata(
 
   const youtubeId = extractYouTubeId(targetUrl);
   if (youtubeId) {
-    const cleanTitle = (initialTitle || 'YouTube Video')
+    const cleanTitle = (initialTitle || '')
       .replace(/^\(\d+\)\s*/, '')
       .replace(/\s*-\s*YouTube$/i, '')
       .trim();
     return {
       url: targetUrl,
       title: cleanTitle || 'YouTube Video',
-      description: 'YouTube Video',
       image_url: `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`,
-      favicon_url: 'https://www.google.com/s2/favicons?domain=youtube.com&sz=64',
+      favicon_url: getGoogleFaviconUrl('youtube.com'),
       domain: 'youtube.com',
       item_type: 'youtube',
       youtube_id: youtubeId,
@@ -304,10 +272,9 @@ export function extractFastMetadata(
 
   return {
     url: targetUrl,
-    title: initialTitle || domain,
-    description: null,
+    title: initialTitle?.trim() || domain,
     image_url: null,
-    favicon_url: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`,
+    favicon_url: getGoogleFaviconUrl(domain),
     domain,
     item_type: 'website',
     youtube_id: null,
@@ -315,51 +282,11 @@ export function extractFastMetadata(
 }
 
 /**
- * Fetches URL with manual redirect validation so an external URL cannot 302-redirect
- * into internal LAN / localhost addresses (SSRF redirect bypass defense).
+ * Fast, single-shot metadata extraction capped at 1.2s total.
+ * - YouTube with an existing title (e.g. from Chrome Extension): 0ms (no network call).
+ * - YouTube without title: 1.2s oEmbed title lookup.
+ * - Websites: 1.2s <head> stream (first 32KB) for title + og:image only, with SSRF protection.
  */
-async function safeFetchWithRedirects(url: string, maxRedirects = 3): Promise<Response | null> {
-  let currentUrl = url;
-  for (let hop = 0; hop <= maxRedirects; hop++) {
-    let parsed: URL;
-    try {
-      parsed = new URL(currentUrl);
-    } catch {
-      return null;
-    }
-
-    const safe = await isSafePublicUrl(parsed);
-    if (!safe) {
-      return null;
-    }
-
-    const res = await fetch(currentUrl, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(2200),
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      },
-    });
-
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
-      if (!location) return null;
-      try {
-        currentUrl = new URL(location, currentUrl).href;
-        continue;
-      } catch {
-        return null;
-      }
-    }
-
-    return res;
-  }
-  return null;
-}
-
 export async function fetchMetadata(
   targetUrl: string,
   initialTitle?: string
@@ -369,136 +296,131 @@ export async function fetchMetadata(
 
   const fast = extractFastMetadata(targetUrl, initialTitle);
 
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(targetUrl);
-    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+  // 1. YouTube handling
+  if (fast.youtube_id) {
+    const hasRealInitialTitle =
+      Boolean(initialTitle) &&
+      fast.title !== 'YouTube Video' &&
+      fast.title.toLowerCase() !== 'youtube' &&
+      fast.title.toLowerCase() !== 'youtube.com';
+
+    if (hasRealInitialTitle) {
+      setCachedMeta(targetUrl, fast);
       return fast;
     }
-  } catch {
-    return fast;
-  }
 
-  // 1. YouTube oEmbed enrichment (fast JSON endpoint)
-  if (fast.youtube_id) {
     let title = fast.title;
-    let authorName = '';
-    let image_url = fast.image_url;
-
     try {
       const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${fast.youtube_id}&format=json`;
       const res = await fetch(oembedUrl, {
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(1200),
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Keep/1.0)' },
       });
       if (res.ok) {
         const data = await res.json();
         if (data.title) {
-          title = String(data.title).replace(/\s*-\s*YouTube$/i, '').slice(0, 300);
-        }
-        if (data.author_name) {
-          authorName = String(data.author_name).slice(0, 120);
-        }
-        if (typeof data.thumbnail_url === 'string' && data.thumbnail_url.startsWith('https://')) {
-          image_url = data.thumbnail_url;
+          title = String(data.title).replace(/\s*-\s*YouTube$/i, '').trim().slice(0, 300);
         }
       }
     } catch {
       // keep fast fallback
     }
 
-    const enriched: ExtractedMetadata = {
-      ...fast,
-      title,
-      image_url,
-      description: authorName ? `By ${authorName} on YouTube` : 'YouTube Video',
-    };
+    const enriched: ExtractedMetadata = { ...fast, title };
     setCachedMeta(targetUrl, enriched);
     return enriched;
   }
 
-  // 2. High-speed HTML <head> streaming scraper with SSRF & DNS-rebinding protection
+  // 2. Website handling (title + og:image only; favicon is always Google S2)
   let title = fast.title;
-  let description: string | null = null;
   let image_url: string | null = null;
-  let favicon_url = fast.favicon_url;
 
   try {
-    const res = await safeFetchWithRedirects(targetUrl, 3);
+    let currentUrl = targetUrl;
+    let res: Response | null = null;
+
+    // Allow up to 2 safe redirects within a strict 1.2s abort deadline
+    const deadlineSignal = AbortSignal.timeout(1200);
+    for (let hop = 0; hop <= 2; hop++) {
+      const parsed = new URL(currentUrl);
+      if (!(await isSafePublicUrl(parsed))) {
+        res = null;
+        break;
+      }
+
+      const hopRes = await fetch(currentUrl, {
+        redirect: 'manual',
+        signal: deadlineSignal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        },
+      });
+
+      if (hopRes.status >= 300 && hopRes.status < 400) {
+        const location = hopRes.headers.get('location');
+        if (!location) break;
+        currentUrl = new URL(location, currentUrl).href;
+        continue;
+      }
+
+      res = hopRes;
+      break;
+    }
 
     if (res && res.ok && res.body) {
       const contentType = (res.headers.get('content-type') || '').toLowerCase();
-      if (!contentType.includes('text/html') && !contentType.includes('application/xhtml+xml')) {
-        return fast;
-      }
+      if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        let htmlHead = '';
+        let totalBytes = 0;
+        const MAX_BYTES = 32 * 1024; // 32KB cap for <head>
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder('utf-8', { fatal: false });
-      let htmlHead = '';
-      let totalBytes = 0;
-      const MAX_BYTES = 64 * 1024; // 64KB cap for <head>
-
-      while (totalBytes < MAX_BYTES) {
-        const { done, value } = await reader.read();
-        if (done || !value) break;
-        totalBytes += value.length;
-        htmlHead += decoder.decode(value, { stream: true });
-        const headEndIdx = htmlHead.toLowerCase().indexOf('</head>');
-        if (headEndIdx !== -1) {
-          htmlHead = htmlHead.slice(0, headEndIdx + 7);
-          break;
-        }
-      }
-      reader.cancel().catch(() => {});
-
-      const parsedMeta = parseHeadMetadata(htmlHead);
-
-      // Preserve user/extension-supplied initialTitle if present, otherwise use scraped title
-      if (parsedMeta.title && (!initialTitle || initialTitle === fast.domain)) {
-        title = parsedMeta.title.slice(0, 300);
-      } else if (!initialTitle && parsedMeta.title) {
-        title = parsedMeta.title.slice(0, 300);
-      }
-      if (parsedMeta.description) {
-        description = parsedMeta.description.slice(0, 500);
-      }
-      if (parsedMeta.image) {
-        try {
-          const resolved = new URL(parsedMeta.image, targetUrl).href;
-          if (
-            (resolved.startsWith('http://') || resolved.startsWith('https://')) &&
-            resolved.length <= 2048
-          ) {
-            image_url = resolved;
+        while (totalBytes < MAX_BYTES) {
+          const { done, value } = await reader.read();
+          if (done || !value) break;
+          totalBytes += value.length;
+          htmlHead += decoder.decode(value, { stream: true });
+          const headEndIdx = htmlHead.toLowerCase().indexOf('</head>');
+          if (headEndIdx !== -1) {
+            htmlHead = htmlHead.slice(0, headEndIdx + 7);
+            break;
           }
-        } catch {
-          // ignore
         }
-      }
-      if (parsedMeta.icon) {
-        try {
-          const resolvedIcon = new URL(parsedMeta.icon, targetUrl).href;
-          if (
-            (resolvedIcon.startsWith('http://') || resolvedIcon.startsWith('https://')) &&
-            resolvedIcon.length <= 2048
-          ) {
-            favicon_url = resolvedIcon;
+        reader.cancel().catch(() => {});
+
+        const parsedMeta = parseHeadTitleAndImage(htmlHead);
+
+        if (parsedMeta.title && (!initialTitle || initialTitle === fast.domain)) {
+          title = parsedMeta.title.slice(0, 300);
+        }
+        if (parsedMeta.image) {
+          try {
+            const resolvedImg = new URL(parsedMeta.image, currentUrl);
+            if (
+              (resolvedImg.protocol === 'https:' || resolvedImg.protocol === 'http:') &&
+              resolvedImg.href.length <= 2048 &&
+              !net.isIP(resolvedImg.hostname) &&
+              resolvedImg.hostname.toLowerCase() !== 'localhost'
+            ) {
+              image_url = resolvedImg.href;
+            }
+          } catch {
+            // ignore invalid og:image URL
           }
-        } catch {
-          // keep default
         }
       }
     }
   } catch {
-    // Graceful fallback
+    // Graceful fallback within 1.2s
   }
 
   const result: ExtractedMetadata = {
     ...fast,
     title,
-    description,
     image_url,
-    favicon_url,
   };
   setCachedMeta(targetUrl, result);
   return result;

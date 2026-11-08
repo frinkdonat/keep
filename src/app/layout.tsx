@@ -1,14 +1,9 @@
 import type { Metadata, Viewport } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { Geist } from 'next/font/google';
 import './globals.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
   subsets: ['latin'],
 });
 
@@ -45,7 +40,7 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icon.png" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-[#08080a] text-zinc-100 antialiased selection:bg-indigo-500/30 selection:text-indigo-200`}
+        className={`${geistSans.variable} min-h-screen bg-[#08080a] text-zinc-100 antialiased selection:bg-indigo-500/30 selection:text-indigo-200`}
       >
         {children}
         <script
