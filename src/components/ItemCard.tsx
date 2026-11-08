@@ -28,8 +28,23 @@ export const ItemCard = memo(function ItemCard({
   onDelete,
 }: ItemCardProps) {
   const [copied, setCopied] = useState(false);
-  const [imgError, setImgError] = useState(false);
+  const [imgSrc, setImgSrc] = useState(item.image_url);
+  const [imgError, setImgError] = useState(!item.image_url);
   const [faviconError, setFaviconError] = useState(false);
+
+  React.useEffect(() => {
+    setImgSrc(item.image_url);
+    setImgError(!item.image_url);
+  }, [item.image_url]);
+
+  const handleImgError = () => {
+    if (item.youtube_id && imgSrc && imgSrc.includes('maxresdefault.jpg')) {
+      // Fallback from 4K maxresdefault to standard YouTube hqdefault thumbnail
+      setImgSrc(`https://i.ytimg.com/vi/${item.youtube_id}/hqdefault.jpg`);
+    } else {
+      setImgError(true);
+    }
+  };
 
   const isVideo = item.item_type === 'youtube' && Boolean(item.youtube_id);
   const domainLabel = cleanDomain(item.domain) || 'website';
@@ -43,20 +58,20 @@ export const ItemCard = memo(function ItemCard({
   };
 
   return (
-    <div className="group relative flex h-[324px] flex-col justify-between overflow-hidden rounded-2xl border border-white/[0.07] bg-[#101015]/85 backdrop-blur-sm transform-gpu transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.15] hover:bg-[#13131a] hover:shadow-2xl hover:shadow-black/60 [content-visibility:auto] [contain-intrinsic-size:0_324px]">
+    <div className="group relative flex h-[324px] flex-col justify-between overflow-hidden rounded-2xl border border-white/[0.07] bg-[#101015]/85 backdrop-blur-sm transform-gpu transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.15] hover:bg-[#13131a] hover:shadow-2xl hover:shadow-black/60">
       {/* Uniform 16:9 Top Media Header for ALL Cards */}
       {isVideo ? (
         <div
           onClick={() => onPlayVideo(item)}
           className="relative aspect-video w-full flex-shrink-0 overflow-hidden bg-zinc-950 cursor-pointer group/thumb"
         >
-          {item.image_url && !imgError ? (
+          {imgSrc && !imgError ? (
             <img
-              src={item.image_url}
+              src={imgSrc}
               alt={item.title}
-              onError={() => setImgError(true)}
+              onError={handleImgError}
+              referrerPolicy="no-referrer"
               className="h-full w-full object-cover transform-gpu transition-transform duration-300 group-hover/thumb:scale-105"
-              loading="lazy"
               decoding="async"
             />
           ) : (
@@ -85,13 +100,13 @@ export const ItemCard = memo(function ItemCard({
           rel="noopener noreferrer"
           className="relative block aspect-video w-full flex-shrink-0 overflow-hidden bg-zinc-950 group/thumb"
         >
-          {item.image_url && !imgError ? (
+          {imgSrc && !imgError ? (
             <img
-              src={item.image_url}
+              src={imgSrc}
               alt={item.title}
-              onError={() => setImgError(true)}
+              onError={handleImgError}
+              referrerPolicy="no-referrer"
               className="h-full w-full object-cover transform-gpu transition-transform duration-300 group-hover/thumb:scale-105"
-              loading="lazy"
               decoding="async"
             />
           ) : (
@@ -111,6 +126,7 @@ export const ItemCard = memo(function ItemCard({
                     src={item.favicon_url}
                     alt=""
                     onError={() => setFaviconError(true)}
+                    referrerPolicy="no-referrer"
                     className="h-4 w-4 rounded-sm"
                     decoding="async"
                   />
@@ -137,6 +153,7 @@ export const ItemCard = memo(function ItemCard({
                   src={item.favicon_url}
                   alt=""
                   onError={() => setFaviconError(true)}
+                  referrerPolicy="no-referrer"
                   className="h-3.5 w-3.5 flex-shrink-0 rounded-sm"
                   decoding="async"
                 />

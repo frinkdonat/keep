@@ -357,13 +357,15 @@ export function KeepDashboard({
             </div>
           </div>
 
-          {/* Mobile Full-Width Filter Tabs Row: Centered, never cut off, Watch Later 100% visible */}
-          <div className="flex sm:hidden mt-2 justify-center overflow-x-auto no-scrollbar">
-            <FilterTabs
-              activeFilter={filter}
-              onFilterChange={setFilter}
-              stats={stats}
-            />
+          {/* Mobile Filter Tabs Row: Safe start alignment so the leftmost Watch Later icon is never clipped */}
+          <div className="flex sm:hidden mt-2 w-full overflow-x-auto no-scrollbar justify-start px-2 py-0.5">
+            <div className="mx-auto flex-shrink-0">
+              <FilterTabs
+                activeFilter={filter}
+                onFilterChange={setFilter}
+                stats={stats}
+              />
+            </div>
           </div>
         </div>
       </header>
