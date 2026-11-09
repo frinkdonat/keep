@@ -53,7 +53,7 @@ x-casaos:
   index: /
   port_map: "3000"
   scheme: http
-  version: "2.0.1"
+  version: "2.0.2"
   icon: https://raw.githubusercontent.com/frinkdonat/keep/main/extension/icons/icon128.png
   title:
     en_us: Keep

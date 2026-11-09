@@ -1,0 +1,63 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  release:
+    types: [ published ]
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and Push to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+          TAGS=("-t" "frinkdonat/keep:latest")
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            TAGS+=("-t" "frinkdonat/keep:${VERSION}" "-t" "frinkdonat/keep:${GITHUB_REF_NAME}")
+          else
+            TAGS+=("-t" "frinkdonat/keep:${GITHUB_SHA}")
+          fi
+          docker build --platform linux/amd64 "${TAGS[@]}" .
+          for tag in "${TAGS[@]}"; do
+            if [[ "$tag" != "-t" ]]; then
+              docker push "$tag"
+            fi
+          done
+
+  release-assets:
+    name: Package & Upload Release Assets
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package Chrome Extension
+        run: npm run package:extension
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/keep-extension-webstore.zip
+            docker-compose.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

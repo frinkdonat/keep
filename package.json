@@ -1,12 +1,11 @@
 {
   "name": "keep",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "node .next/standalone/server.js",
-    "lint": "eslint",
     "package:extension": "mkdir -p dist && (cd extension && zip -r -FS ../dist/keep-extension-webstore.zip . -x '*.DS_Store' '*Thumbs.db*')"
   },
   "dependencies": {
@@ -20,8 +19,6 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.4.5",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
