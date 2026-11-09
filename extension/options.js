@@ -27,9 +27,20 @@ function showStatus(text, isError = false) {
   statusMsg.style.display = 'block';
 }
 
+function normalizeServerUrl(raw) {
+  let url = typeof raw === 'string' && raw ? raw.trim().replace(/\/+$/, '') : DEFAULT_SERVER_URL;
+  if (url && !/^https?:\/\//i.test(url)) {
+    url = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(url)
+      ? `http://${url}`
+      : `https://${url}`;
+  }
+  return url;
+}
+
 // Test Connection
 btnTest.addEventListener('click', async () => {
-  const serverUrl = serverUrlInput.value.trim().replace(/\/+$/, '');
+  const serverUrl = normalizeServerUrl(serverUrlInput.value);
+  serverUrlInput.value = serverUrl;
   const apiKey = apiKeyInput.value.trim();
 
   if (!serverUrl) {
@@ -63,7 +74,8 @@ btnTest.addEventListener('click', async () => {
 // Save Settings
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  const serverUrl = serverUrlInput.value.trim().replace(/\/+$/, '');
+  const serverUrl = normalizeServerUrl(serverUrlInput.value);
+  serverUrlInput.value = serverUrl;
   const apiKey = apiKeyInput.value.trim();
 
   chrome.storage.sync.set(

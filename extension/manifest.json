@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Keep — 1-Click Watch Later",
-  "version": "2.0.0",
+  "short_name": "Keep",
+  "version": "2.0.1",
   "description": "Save YouTube videos and interesting websites to your self-hosted Keep library in one click.",
   "homepage_url": "https://github.com/frinkdonat/keep",
   "author": "frinkdonat",

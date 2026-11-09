@@ -95,7 +95,14 @@ async function isSafePublicUrl(parsed: URL): Promise<boolean> {
     host.endsWith('.internal') ||
     host.endsWith('.lan') ||
     host.endsWith('.home') ||
-    host.endsWith('.arpa')
+    host.endsWith('.arpa') ||
+    host.endsWith('.box') ||
+    host.endsWith('.corp') ||
+    host.endsWith('.intranet') ||
+    host.endsWith('.test') ||
+    host.endsWith('.example') ||
+    host.endsWith('.invalid') ||
+    host.endsWith('.onion')
   ) {
     return false;
   }

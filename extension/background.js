@@ -3,6 +3,18 @@
 const DEFAULT_SERVER_URL = 'http://localhost:3000';
 const DEFAULT_API_KEY = 'keep_secret_api_key';
 
+const pendingTabs = new Set();
+
+function normalizeServerUrl(raw) {
+  let url = typeof raw === 'string' && raw ? raw.trim().replace(/\/+$/, '') : DEFAULT_SERVER_URL;
+  if (url && !/^https?:\/\//i.test(url)) {
+    url = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(url)
+      ? `http://${url}`
+      : `https://${url}`;
+  }
+  return url;
+}
+
 async function getSettings() {
   return new Promise((resolve) => {
     chrome.storage.sync.get(
@@ -11,11 +23,10 @@ async function getSettings() {
         apiKey: DEFAULT_API_KEY,
       },
       (items) => {
-        const rawUrl = typeof items?.serverUrl === 'string' && items.serverUrl ? items.serverUrl : DEFAULT_SERVER_URL;
+        const rawUrl = items?.serverUrl;
         const rawKey = typeof items?.apiKey === 'string' && items.apiKey ? items.apiKey : DEFAULT_API_KEY;
-        const serverUrl = rawUrl.trim().replace(/\/+$/, '');
         resolve({
-          serverUrl,
+          serverUrl: normalizeServerUrl(rawUrl),
           apiKey: rawKey.trim(),
         });
       }
@@ -88,18 +99,23 @@ chrome.action.onClicked.addListener(async (tab) => {
     return;
   }
 
-  const { serverUrl, apiKey } = await getSettings();
-
-  if (!serverUrl || !apiKey) {
-    chrome.runtime.openOptionsPage();
+  if (pendingTabs.has(tab.id)) {
     return;
   }
-
-  // Set pending badge
-  chrome.action.setBadgeText({ tabId: tab.id, text: '...' });
-  chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: '#f59e0b' });
+  pendingTabs.add(tab.id);
 
   try {
+    const { serverUrl, apiKey } = await getSettings();
+
+    if (!serverUrl || !apiKey) {
+      chrome.runtime.openOptionsPage();
+      return;
+    }
+
+    // Set pending badge
+    chrome.action.setBadgeText({ tabId: tab.id, text: '...' });
+    chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: '#f59e0b' });
+
     const res = await fetch(`${serverUrl}/api/links`, {
       method: 'POST',
       headers: {
@@ -157,10 +173,12 @@ chrome.action.onClicked.addListener(async (tab) => {
     console.error('Keep extension fetch error:', err);
     chrome.action.setBadgeText({ tabId: tab.id, text: 'ERR' });
     chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: '#ef4444' });
-    showToastOnTab(tab.id, `Could not reach Keep at ${serverUrl}`, true);
+    showToastOnTab(tab.id, 'Could not reach Keep server', true);
 
     setTimeout(() => {
       chrome.action.setBadgeText({ tabId: tab.id, text: '' });
     }, 3500);
+  } finally {
+    pendingTabs.delete(tab.id);
   }
 });

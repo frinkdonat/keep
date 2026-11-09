@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+.next
+out
+build
+data
+dist
+scripts
+extension
+.env*
+*.log
+.DS_Store
+Thumbs.db
+README.md
+PRIVACY.md
+AGENTS.md
