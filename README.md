@@ -4,16 +4,19 @@ A minimal, self-hosted Watch Later and bookmarking queue. Save YouTube videos an
 
 ---
 
-## Quick Start (Docker)
+## Quick Start (ZimaOS / Docker)
 
-Download [`docker-compose.yml`](https://github.com/frinkdonat/keep/releases/latest) from the latest release, or create it directly:
+Download [`docker-compose.yml`](https://github.com/frinkdonat/keep/releases/latest) from the latest release, or use the configuration below:
 
 ```yaml
+name: keep
+
 services:
   keep:
     image: frinkdonat/keep:latest
     container_name: keep-app
     restart: unless-stopped
+    network_mode: bridge
     ports:
       - "3000:3000"
     environment:
@@ -21,17 +24,48 @@ services:
       - PASSWORD=changeme
       - API_KEY=keep_secret_api_key
       - DATA_DIR=/app/data
+      - NODE_ENV=production
     volumes:
-      - ./data:/app/data
+      - /DATA/AppData/keep/data:/app/data
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/frinkdonat/keep@main/extension/icons/icon128.png
+
+x-casaos:
+  id: io.github.frinkdonat.keep
+  main: keep
+  index: /
+  port_map: "3000"
+  scheme: http
+  icon: https://cdn.jsdelivr.net/gh/frinkdonat/keep@main/extension/icons/icon128.png
+  title:
+    en_US: Keep
+  tagline:
+    en_US: Minimal self-hosted Watch Later and bookmarking queue
+  description:
+    en_US: A minimal, self-hosted Watch Later and bookmarking queue. Save YouTube videos and articles in one click, and browse them in a clean, distraction-free dashboard.
+  author: frinkdonat
+  developer: frinkdonat
+  category: Productivity
+  architectures:
+    - amd64
+  tips:
+    before_install:
+      en_US: Default credentials are USERNAME=admin, PASSWORD=changeme, and API_KEY=keep_secret_api_key. Update them in the environment variables before installing.
 ```
 
-Start the container:
+### Install on ZimaOS
+
+1. Open your ZimaOS dashboard and click **+** (top-right corner) → **Install a customized app**.
+2. Click **Import** (top-right of the modal) and paste or upload `docker-compose.yml`.
+3. Click **Submit**, update `USERNAME`, `PASSWORD`, and `API_KEY` in the form, then click **Install**.
+
+### Install via Docker Compose CLI
 
 ```bash
 docker compose up -d
 ```
 
-Open `http://localhost:3000` to access Keep.
+Open `http://localhost:3000` (or your ZimaOS server IP on port `3000`) to access Keep.
 
 ---
 
