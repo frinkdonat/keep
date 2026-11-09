@@ -8,12 +8,14 @@ jobs:
   build-and-push:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout, Build, and Push to Docker Hub
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and Push to Docker Hub
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          git clone --depth 1 --branch "${GITHUB_REF_NAME}" "https://github.com/${GITHUB_REPOSITORY}.git" .
           echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
           docker build --platform linux/amd64 \
             -t "frinkdonat/keep:latest" \

@@ -70,9 +70,9 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-zinc-100 mb-2">5. Open Source & Contact</h2>
+            <h2 className="text-base font-semibold text-zinc-100 mb-2">5. Support & Contact</h2>
             <p>
-              Keep is open-source software. For any questions or concerns, please visit the project repository on GitHub:{' '}
+              For any questions or concerns regarding Keep, please contact the maintainer or visit:{' '}
               <a 
                 href="https://github.com/frinkdonat/keep" 
                 target="_blank" 

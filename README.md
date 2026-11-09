@@ -92,4 +92,4 @@ If you have **Enhanced Safe Browsing** (*Fokozott védelem*) enabled in Chrome (
 
 ## 📄 License & Privacy
 
-Keep is open-source software. Read the [Privacy Policy](PRIVACY.md) for details on data handling.
+Keep is self-hosted software. Read the [Privacy Policy](PRIVACY.md) for details on data handling.

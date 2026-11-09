@@ -22,6 +22,6 @@ The Extension only accesses data upon explicit user action (clicking the extensi
 - The Extension **does not collect, sell, rent, or trade** any personal information or browsing history.
 - The Extension **does not include** any analytics, tracking scripts, advertising SDKs, or telemetry.
 
-## 5. Contact & Source Code
-The Extension is open-source. For inquiries or questions regarding this Privacy Policy, please open an issue on the project repository:
+## 5. Contact & Support
+For inquiries or questions regarding this Privacy Policy, please contact the maintainer or project repository:
 [https://github.com/frinkdonat/keep](https://github.com/frinkdonat/keep)
