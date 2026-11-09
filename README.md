@@ -28,7 +28,35 @@ services:
     volumes:
       - /DATA/AppData/keep/data:/app/data
     labels:
-      icon: https://cdn.jsdelivr.net/gh/frinkdonat/keep@main/extension/icons/icon128.png
+      icon: https://raw.githubusercontent.com/frinkdonat/keep/main/extension/icons/icon128.png
+    x-casaos:
+      envs:
+        - container: USERNAME
+          description:
+            en_us: Admin username for Web UI login
+            en_US: Admin username for Web UI login
+        - container: PASSWORD
+          description:
+            en_us: Admin password for Web UI login
+            en_US: Admin password for Web UI login
+        - container: API_KEY
+          description:
+            en_us: Secret API key for Chrome Extension sync
+            en_US: Secret API key for Chrome Extension sync
+        - container: DATA_DIR
+          description:
+            en_us: SQLite database directory inside the container
+            en_US: SQLite database directory inside the container
+      ports:
+        - container: "3000"
+          description:
+            en_us: Web UI HTTP port
+            en_US: Web UI HTTP port
+      volumes:
+        - container: /app/data
+          description:
+            en_us: Persistent SQLite database directory
+            en_US: Persistent SQLite database directory
 
 x-casaos:
   id: io.github.frinkdonat.keep
@@ -36,12 +64,16 @@ x-casaos:
   index: /
   port_map: "3000"
   scheme: http
-  icon: https://cdn.jsdelivr.net/gh/frinkdonat/keep@main/extension/icons/icon128.png
+  version: "2.0.1"
+  icon: https://raw.githubusercontent.com/frinkdonat/keep/main/extension/icons/icon128.png
   title:
+    en_us: Keep
     en_US: Keep
   tagline:
+    en_us: Minimal self-hosted Watch Later and bookmarking queue
     en_US: Minimal self-hosted Watch Later and bookmarking queue
   description:
+    en_us: A minimal, self-hosted Watch Later and bookmarking queue. Save YouTube videos and articles in one click, and browse them in a clean, distraction-free dashboard.
     en_US: A minimal, self-hosted Watch Later and bookmarking queue. Save YouTube videos and articles in one click, and browse them in a clean, distraction-free dashboard.
   author: frinkdonat
   developer: frinkdonat
@@ -50,6 +82,7 @@ x-casaos:
     - amd64
   tips:
     before_install:
+      en_us: Default credentials are USERNAME=admin, PASSWORD=changeme, and API_KEY=keep_secret_api_key. Update them in the environment variables before installing.
       en_US: Default credentials are USERNAME=admin, PASSWORD=changeme, and API_KEY=keep_secret_api_key. Update them in the environment variables before installing.
 ```
 
