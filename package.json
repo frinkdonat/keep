@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "node .next/standalone/server.js",
     "lint": "eslint",
-    "package:extension": "node scripts/package-extension.mjs"
+    "package:extension": "mkdir -p dist && (cd extension && zip -r -FS ../dist/keep-extension-webstore.zip . -x '*.DS_Store' '*Thumbs.db*')"
   },
   "dependencies": {
     "lucide-react": "^1.70.0",
