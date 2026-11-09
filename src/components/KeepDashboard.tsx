@@ -23,7 +23,6 @@ import { UserManagementModal } from '@/components/UserManagementModal';
 export interface InitialBootstrapProps {
   authenticated: boolean;
   user: AuthenticatedUserInfo | null;
-  setupCompleted: boolean;
   isDefaultCredentials: boolean;
   apiKey?: string;
   initialItems: KeepItem[];
@@ -33,7 +32,6 @@ export interface InitialBootstrapProps {
 export function KeepDashboard({
   authenticated,
   user,
-  setupCompleted,
   isDefaultCredentials: initialIsDefault,
   apiKey: initialApiKey,
   initialItems,
@@ -50,7 +48,7 @@ export function KeepDashboard({
 
   const [needsAuth, setNeedsAuth] = useState(!authenticated);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUserInfo | null>(user);
-  const [showOnboarding, setShowOnboarding] = useState(authenticated && !setupCompleted);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [isDefaultCredentials, setIsDefaultCredentials] = useState(initialIsDefault);
   const [setupApiKey, setSetupApiKey] = useState<string | undefined>(initialApiKey);
 
@@ -132,7 +130,6 @@ export function KeepDashboard({
       etagRef.current = null;
       setNeedsAuth(false);
       setCurrentUser(payload.user);
-      setShowOnboarding(!payload.setupCompleted);
       setIsDefaultCredentials(payload.isDefaultCredentials);
       setSetupApiKey(payload.apiKey);
       loadItems(true);

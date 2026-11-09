@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getAuthenticatedUser, readJsonBounded } from '@/lib/auth';
-import { UpdateItemInput } from '@/lib/types';
 
 export async function PATCH(
   req: NextRequest,
@@ -14,17 +13,8 @@ export async function PATCH(
 
   const { id } = await params;
   try {
-    const body = await readJsonBounded<UpdateItemInput>(req, 8192);
-    const sanitized: UpdateItemInput = {};
-
-    if (typeof body.title === 'string') {
-      sanitized.title = body.title.trim().slice(0, 500);
-    }
-    if (body.is_archived !== undefined) {
-      sanitized.is_archived = body.is_archived ? 1 : 0;
-    }
-
-    const updated = db.update(user.id, id, sanitized);
+    const body = await readJsonBounded<{ is_archived?: boolean | number }>(req, 1024);
+    const updated = db.update(user.id, id, { is_archived: body.is_archived ? 1 : 0 });
     if (!updated) {
       return NextResponse.json({ error: 'Item not found' }, { status: 404 });
     }

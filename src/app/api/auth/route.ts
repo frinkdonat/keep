@@ -52,7 +52,6 @@ export async function POST(req: NextRequest) {
           role: user.role,
           apiKey: user.api_key,
         },
-        setupCompleted: user.setup_completed === 1,
         isDefaultCredentials: user.role === 'admin' ? isDefaultCredentials : false,
         apiKey: user.api_key,
       });

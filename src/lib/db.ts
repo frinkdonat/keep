@@ -133,7 +133,6 @@ interface PreparedStatements {
   updateUserApiKey: StatementSync;
   deleteUserById: StatementSync;
   deleteUserLinks: StatementSync;
-  markSetupDone: StatementSync;
   countUserLinks: StatementSync;
 
   getLinksAll: StatementSync;
@@ -253,7 +252,6 @@ function getContext(): DbContext {
       password_hash TEXT NOT NULL,
       api_key TEXT NOT NULL UNIQUE,
       role TEXT NOT NULL DEFAULT 'user',
-      setup_completed INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
 
@@ -262,15 +260,12 @@ function getContext(): DbContext {
       user_id TEXT NOT NULL DEFAULT 'admin',
       url TEXT NOT NULL,
       title TEXT NOT NULL,
-      description TEXT,
       image_url TEXT,
       favicon_url TEXT,
       domain TEXT,
       item_type TEXT DEFAULT 'website',
       youtube_id TEXT,
       is_archived INTEGER DEFAULT 0,
-      is_favorite INTEGER DEFAULT 0,
-      notes TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -289,8 +284,8 @@ function getContext(): DbContext {
   if (!existingAdmin) {
     database
       .prepare(
-        `INSERT INTO users (id, username, password_hash, api_key, role, setup_completed, created_at)
-         VALUES ('admin', ?, ?, ?, 'admin', 0, ?)`
+        `INSERT INTO users (id, username, password_hash, api_key, role, created_at)
+         VALUES ('admin', ?, ?, ?, 'admin', ?)`
       )
       .run(
         envAdmin.username,
@@ -319,7 +314,7 @@ function getContext(): DbContext {
   const stmts: PreparedStatements = {
     getAllUsersWithCounts: database.prepare(`
       SELECT 
-        u.id, u.username, u.api_key, u.role, u.setup_completed, u.created_at,
+        u.id, u.username, u.api_key, u.role, u.created_at,
         COUNT(l.id) as item_count
       FROM users u
       LEFT JOIN links l ON l.user_id = u.id
@@ -327,14 +322,13 @@ function getContext(): DbContext {
       ORDER BY CASE WHEN u.role = 'admin' THEN 0 ELSE 1 END, u.created_at ASC
     `),
     insertUser: database.prepare(`
-      INSERT INTO users (id, username, password_hash, api_key, role, setup_completed, created_at)
-      VALUES (?, ?, ?, ?, 'user', 0, ?)
+      INSERT INTO users (id, username, password_hash, api_key, role, created_at)
+      VALUES (?, ?, ?, ?, 'user', ?)
     `),
     updateUserPassword: database.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
     updateUserApiKey: database.prepare('UPDATE users SET api_key = ? WHERE id = ?'),
     deleteUserById: database.prepare('DELETE FROM users WHERE id = ?'),
     deleteUserLinks: database.prepare('DELETE FROM links WHERE user_id = ?'),
-    markSetupDone: database.prepare('UPDATE users SET setup_completed = 1 WHERE id = ?'),
     countUserLinks: database.prepare('SELECT COUNT(*) as c FROM links WHERE user_id = ?'),
 
     getLinksAll: database.prepare(
@@ -412,7 +406,6 @@ export const db = {
       username: string;
       api_key: string;
       role: 'admin' | 'user';
-      setup_completed: number;
       created_at: number;
       item_count: number | bigint;
     }>;
@@ -422,7 +415,6 @@ export const db = {
       username: r.username,
       api_key: r.api_key,
       role: r.role,
-      setup_completed: r.setup_completed === 1,
       item_count: Number(r.item_count),
       created_at: r.created_at,
     }));
@@ -448,7 +440,6 @@ export const db = {
       username: cleanUsername,
       api_key: apiKey,
       role: 'user',
-      setup_completed: false,
       item_count: 0,
       created_at: now,
     };
@@ -479,7 +470,6 @@ export const db = {
       username: updated.username,
       api_key: updated.api_key,
       role: updated.role,
-      setup_completed: updated.setup_completed === 1,
       item_count: Number(countRow.c),
       created_at: updated.created_at,
     };
@@ -493,15 +483,6 @@ export const db = {
     ctx.userRevisions.delete(id);
     rebuildUserCache(ctx.database, ctx.usersById, ctx.usersByUsername, ctx.usersByApiKey);
     return Number(result.changes) > 0;
-  },
-
-  markUserSetupCompleted(userId: string): void {
-    const ctx = getContext();
-    ctx.stmts.markSetupDone.run(userId);
-    const u = ctx.usersById.get(userId);
-    if (u) {
-      u.setup_completed = 1;
-    }
   },
 
   getAll(userId: string, filter: FilterCategory = 'inbox'): KeepItem[] {
@@ -574,36 +555,11 @@ export const db = {
 
   update(userId: string, id: string, input: UpdateItemInput): KeepItem | null {
     const ctx = getContext();
-
-    if (input.is_archived !== undefined && input.title === undefined) {
-      const now = Date.now();
-      const archivedVal = input.is_archived ? 1 : 0;
-      const res = ctx.stmts.updateLinkArchive.run(archivedVal, now, id, userId);
-      if (Number(res.changes) === 0) return null;
-      bumpRevision(ctx, userId);
-      return this.getById(userId, id);
-    }
-
-    const existing = this.getById(userId, id);
-    if (!existing) return null;
-
-    const fields: string[] = ['updated_at = ?'];
-    const params: (string | number | null)[] = [Date.now()];
-
-    if (input.title !== undefined) {
-      fields.push('title = ?');
-      params.push(input.title);
-    }
-    if (input.is_archived !== undefined) {
-      fields.push('is_archived = ?');
-      params.push(input.is_archived ? 1 : 0);
-    }
-
-    params.push(id, userId);
-    const sql = `UPDATE links SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`;
-    ctx.database.prepare(sql).run(...params);
+    const now = Date.now();
+    const archivedVal = input.is_archived ? 1 : 0;
+    const res = ctx.stmts.updateLinkArchive.run(archivedVal, now, id, userId);
+    if (Number(res.changes) === 0) return null;
     bumpRevision(ctx, userId);
-
     return this.getById(userId, id);
   },
 

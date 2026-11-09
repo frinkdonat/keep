@@ -13,7 +13,6 @@ export interface AuthenticatedUserInfo {
 
 export interface LoginSuccessPayload {
   user: AuthenticatedUserInfo;
-  setupCompleted: boolean;
   isDefaultCredentials: boolean;
   apiKey?: string;
 }
@@ -47,7 +46,6 @@ export function PasscodeLock({ onSuccess }: PasscodeLockProps) {
       if (res.ok && data.ok) {
         onSuccess({
           user: data.user,
-          setupCompleted: Boolean(data.setupCompleted),
           isDefaultCredentials: Boolean(data.isDefaultCredentials),
           apiKey: data.apiKey,
         });

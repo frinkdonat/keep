@@ -15,7 +15,6 @@ export default async function HomePage() {
       <KeepDashboard
         authenticated={false}
         user={null}
-        setupCompleted={false}
         isDefaultCredentials={false}
         initialItems={[]}
         initialEtag={null}
@@ -37,7 +36,6 @@ export default async function HomePage() {
         role: user.role,
         apiKey: user.api_key,
       }}
-      setupCompleted={user.setup_completed === 1}
       isDefaultCredentials={user.role === 'admin' ? isDefaultCredentials : false}
       apiKey={user.api_key}
       initialItems={initialItems}

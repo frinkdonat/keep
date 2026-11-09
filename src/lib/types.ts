@@ -8,7 +8,6 @@ export interface UserRecord {
   password_hash: string;
   api_key: string;
   role: UserRole;
-  setup_completed: number; // 0 or 1
   created_at: number;
 }
 
@@ -17,7 +16,6 @@ export interface PublicUser {
   username: string;
   api_key: string;
   role: UserRole;
-  setup_completed: boolean;
   item_count: number;
   created_at: number;
 }
@@ -51,7 +49,6 @@ export interface CreateItemInput {
 }
 
 export interface UpdateItemInput {
-  title?: string;
   is_archived?: boolean | number;
 }
 
