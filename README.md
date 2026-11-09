@@ -67,6 +67,15 @@ Your database will be persisted in `./data/keep.db`.
 
 Now, whenever you are on a YouTube video or article, just click the Keep extension icon in your Chrome toolbar to save it immediately.
 
+### 🛡️ Chrome "Enhanced Safe Browsing" Warning
+If you have **Enhanced Safe Browsing** (*Fokozott védelem*) enabled in Chrome (`chrome://settings/security`), Chrome displays an informational banner stating:
+> *"This extension is not trusted by Enhanced Safe Browsing"* (or in Hungarian: *"Ez a bővítmény nem megbízható a fokozott védelemmel ellátott Biztonságos Böngészés szerint"*).
+
+**Why this happens & how to handle it:**
+- **The extension is 100% functional**: The warning is purely informational and does **not** block or disable Keep. Notice that the toggle switch is still enabled and the extension works normally.
+- **Why Google shows it**: Enhanced Safe Browsing flags **all** locally loaded / unpacked extensions or extensions from new Chrome Web Store developer accounts until Google's reputation heuristics automatically recognize them after several months of compliant history.
+- **To silence the warning badge**: Open Chrome Settings → **Privacy and security** → **Security**, and choose **Standard protection** (*Normál védelem*). Standard protection is Chrome's default, protects against real malware and phishing sites, and does not show reputation warnings for self-hosted extensions.
+
 ---
 
 ## ⚙️ Configuration (`.env`)

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "node .next/standalone/server.js",
-    "lint": "eslint"
+    "lint": "eslint",
+    "package:extension": "node scripts/package-extension.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.70.0",

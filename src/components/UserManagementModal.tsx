@@ -144,7 +144,10 @@ export function UserManagementModal({ onClose }: UserManagementModalProps) {
 
     setUsers((prev) => prev.filter((item) => item.id !== u.id));
     try {
-      await fetch(`/api/users/${u.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/users/${u.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        loadUsers();
+      }
     } catch {
       loadUsers();
     }

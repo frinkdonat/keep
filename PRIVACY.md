@@ -11,6 +11,7 @@ The Extension is a personal utility designed solely to save the URL and title of
 The Extension only accesses data upon explicit user action (clicking the extension icon in the toolbar):
 - **Active Tab URL and Title**: When clicked, the active tab's URL and title are read using the `activeTab` permission.
 - **Server URL & API Key**: The user-configured self-hosted server destination and secret token are stored locally using the `storage` permission.
+- **In-Page Feedback Toast**: The `scripting` permission is used solely to render a transient in-page notification pill confirming when a link was successfully saved or reporting an error. No webpage contents or scripts are read, recorded, or modified.
 
 ## 3. How Data is Transmitted and Stored
 - **Direct Transmission**: The active tab URL and title are transmitted directly from your browser to your designated self-hosted Keep server via an HTTP/HTTPS POST request.

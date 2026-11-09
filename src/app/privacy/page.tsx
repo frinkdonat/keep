@@ -48,6 +48,9 @@ export default function PrivacyPage() {
               <li>
                 <strong className="text-zinc-200">Server Configuration:</strong> Your destination Keep server URL and secret API key are stored locally in your browser&apos;s storage.
               </li>
+              <li>
+                <strong className="text-zinc-200">In-Page Feedback Toast:</strong> Uses the scripting permission solely to display a transient in-page notification pill confirming when a link was successfully saved or reporting an error. No webpage contents or scripts are read, recorded, or modified.
+              </li>
             </ul>
           </section>
 

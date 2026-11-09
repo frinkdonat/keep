@@ -16,8 +16,8 @@ chrome.storage.sync.get(
     apiKey: DEFAULT_API_KEY,
   },
   (items) => {
-    serverUrlInput.value = items.serverUrl;
-    apiKeyInput.value = items.apiKey;
+    serverUrlInput.value = (typeof items?.serverUrl === 'string' && items.serverUrl) ? items.serverUrl : DEFAULT_SERVER_URL;
+    apiKeyInput.value = (typeof items?.apiKey === 'string' && items.apiKey) ? items.apiKey : DEFAULT_API_KEY;
   }
 );
 
@@ -45,6 +45,7 @@ btnTest.addEventListener('click', async () => {
       headers: {
         'Authorization': `Bearer ${apiKey}`,
       },
+      signal: AbortSignal.timeout(6000),
     });
 
     if (res.ok) {

@@ -11,12 +11,12 @@ async function getSettings() {
         apiKey: DEFAULT_API_KEY,
       },
       (items) => {
-        let serverUrl = items.serverUrl.trim();
-        // Remove trailing slash
-        serverUrl = serverUrl.replace(/\/+$/, '');
+        const rawUrl = typeof items?.serverUrl === 'string' && items.serverUrl ? items.serverUrl : DEFAULT_SERVER_URL;
+        const rawKey = typeof items?.apiKey === 'string' && items.apiKey ? items.apiKey : DEFAULT_API_KEY;
+        const serverUrl = rawUrl.trim().replace(/\/+$/, '');
         resolve({
           serverUrl,
-          apiKey: items.apiKey.trim(),
+          apiKey: rawKey.trim(),
         });
       }
     );
@@ -84,7 +84,7 @@ function showToastOnTab(tabId, message, isError = false) {
 
 // 1-Click Save Action
 chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
+  if (!tab || !tab.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
     return;
   }
 
@@ -110,6 +110,7 @@ chrome.action.onClicked.addListener(async (tab) => {
         url: tab.url,
         title: tab.title || '',
       }),
+      signal: AbortSignal.timeout(8000),
     });
 
     if (res.ok) {
